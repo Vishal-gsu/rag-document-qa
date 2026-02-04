@@ -1,14 +1,16 @@
-# � Intelligent Document Q&A System with RAG
+# 🤖 Intelligent Document Q&A System with RAG
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/Docker-Required-blue)](https://www.docker.com/)
+[![Contact](https://img.shields.io/badge/Email-vishalgsu%40gmail.com-red)](mailto:vishalgsu@gmail.com)
 
 A **production-ready Retrieval Augmented Generation (RAG)** system that lets you chat with your documents using AI. Upload PDFs, Word docs, or text files and ask questions - get accurate, cited answers in seconds!
 
-![RAG Architecture](https://img.shields.io/badge/Architecture-RAG-green) ![Vector DB](https://img.shields.io/badge/VectorDB-Endee%20HNSW-orange) ![LLM](https://img.shields.io/badge/LLM-4%20Options-purple)
+![RAG Architecture](https://img.shields.io/badge/Architecture-RAG-green) ![Vector DB](https://img.shields.io/badge/VectorDB-Endee%20HNSW-orange) ![LLM](https://img.shields.io/badge/LLM-4%20Options-purple) ![Embeddings](https://img.shields.io/badge/Embeddings-BGE--1024D-brightgreen)
 
 > **📌 Built with [Endee Vector Database](https://github.com/EndeeLabs/endee)** | [My Forked Repository](https://github.com/Vishal-gsu/endee)
+> 
+> **👨‍💻 Developer:** Vishal Kumar | **📧 Contact:** vishalgsu@gmail.com
 
 ---
 
@@ -25,77 +27,379 @@ A **production-ready Retrieval Augmented Generation (RAG)** system that lets you
 
 ---
 
-## 🎯 How It Works
+## 🎯 How It Works - Complete RAG Architecture
 
 ```
-📄 Upload Documents → 🔪 Chunk Text → 🧠 Generate Embeddings → 💾 Store in Vector DB
-                                                                        ↓
-                                                              🔍 Your Question
-                                                                        ↓
-                                                    🎯 Similarity Search (HNSW)
-                                                                        ↓
-                                                    📚 Retrieve Top-K Relevant Chunks
-                                                                        ↓
-                                                    🤖 LLM + Context → ✅ Answer
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        DOCUMENT INDEXING PHASE                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  📄 PDF/DOCX/TXT Files                                                 │
+│         ↓                                                               │
+│  🔧 Document Processor (PyPDF2, python-docx)                          │
+│         ↓                                                               │
+│  🔪 Text Chunker (1000 chars, 200 overlap)                            │
+│         ↓                                                               │
+│  🧠 Embedding Engine (BAAI/bge-large-en-v1.5)                         │
+│         ↓                                                               │
+│  📊 1024-dimensional vectors                                           │
+│         ↓                                                               │
+│  💾 Endee Vector DB (HNSW Index)                                       │
+│     • Layer 2: Long-range connections (sparse)                         │
+│     • Layer 1: Medium-range connections                                │
+│     • Layer 0: All vectors (dense graph)                               │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         QUERY PROCESSING PHASE                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  💭 User Question: "What is machine learning?"                         │
+│         ↓                                                               │
+│  🧠 Same Embedding Model (BAAI/bge-large-en-v1.5)                      │
+│         ↓                                                               │
+│  📊 Query Vector [1024 dimensions]                                     │
+│         ↓                                                               │
+│  🔍 Endee HNSW Search                                                   │
+│     • Start at top layer (Layer 2)                                     │
+│     • Navigate to nearest neighbors                                     │
+│     • Descend to Layer 1, refine search                                │
+│     • Final search at Layer 0 (base layer)                             │
+│     • Time Complexity: O(log n) - FAST! ⚡                             │
+│         ↓                                                               │
+│  📚 Top-5 Most Similar Chunks                                          │
+│     Chunk 1: 0.87 similarity                                           │
+│     Chunk 2: 0.82 similarity                                           │
+│     Chunk 3: 0.78 similarity                                           │
+│     Chunk 4: 0.71 similarity                                           │
+│     Chunk 5: 0.68 similarity                                           │
+│         ↓                                                               │
+│  📝 Prompt Template                                                     │
+│     Context: [Retrieved chunks]                                        │
+│     Question: [User question]                                          │
+│     Instructions: Answer based on context only                         │
+│         ↓                                                               │
+│  🤖 LLM (Groq/OpenAI/Ollama)                                           │
+│         ↓                                                               │
+│  ✅ AI-Generated Answer + Citations                                     │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### RAG Pipeline
+### 🔬 Detailed RAG Pipeline Breakdown
 
-1. **Document Ingestion** - Upload PDFs/DOCX/TXT files
-2. **Chunking** - Split into 500-character chunks with overlap
-3. **Embedding** - Convert text to 384D vectors using sentence-transformers
-4. **Storage** - Store in Endee Vector DB with HNSW indexing
-5. **Query** - User asks a question
-6. **Retrieval** - Find top-5 similar chunks using cosine similarity
-7. **Generation** - LLM generates answer using retrieved context
-8. **Response** - Get answer with source citations
+#### **Phase 1: Document Indexing (One-Time Setup)**
+
+1. **📄 Document Ingestion** 
+   - Accepts PDF, DOCX, TXT, Markdown files
+   - Uses PyPDF2 for PDFs, python-docx for Word docs
+   - Extracts raw text while preserving structure
+
+2. **🔪 Intelligent Chunking**
+   - Chunk Size: 1000 characters (optimal for context)
+   - Overlap: 200 characters (prevents information loss at boundaries)
+   - Creates ~4,772 chunks from typical document set
+
+3. **🧠 Embedding Generation**
+   - Model: **BAAI/bge-large-en-v1.5** (State-of-the-art)
+   - Dimension: **1024D** (high semantic precision)
+   - Each chunk → 1024-dimensional vector
+   - Captures semantic meaning, not just keywords
+
+4. **💾 Vector Storage in Endee**
+   - Algorithm: **HNSW (Hierarchical Navigable Small World)**
+   - Creates multi-layer graph structure
+   - Persistent storage using Docker volumes
+   - Supports millions of vectors efficiently
+
+#### **Phase 2: Query Processing (Every Search)**
+
+5. **💭 Question Embedding**
+   - User asks: "What is machine learning?"
+   - Same model (BAAI/bge-large-en-v1.5) converts to 1024D vector
+   - **Critical:** Query and documents use same embedding space
+
+6. **🔍 HNSW Similarity Search**
+   - Compares query vector with document vectors
+   - Uses cosine similarity metric
+   - HNSW navigates graph intelligently (not brute force)
+   - Finds top-5 most similar chunks in ~5ms (O(log n))
+   - Filters results above 0.30 similarity threshold
+
+7. **🤖 LLM Answer Generation**
+   - Combines retrieved context + user question
+   - Sends to LLM (Groq Llama/GPT-3.5/Ollama)
+   - LLM generates answer based ONLY on provided context
+   - Prevents hallucination by grounding in retrieved data
+
+8. **✅ Response with Citations**
+   - Returns AI-generated answer
+   - Shows source documents and similarity scores
+   - User can verify information accuracy
 
 ---
 
-## 🚀 Quick Start (5 Minutes)
+## 🚀 Complete Installation & Setup Guide
 
-### Prerequisites
+### 📋 Prerequisites
 
-- **Python 3.8+** ([Download](https://www.python.org/downloads/))
-- **Docker Desktop** ([Download](https://www.docker.com/products/docker-desktop/))
-- **Git** ([Download](https://git-scm.com/downloads))
+Before starting, ensure you have these installed:
 
-### Installation
+| Requirement | Version | Download Link | Purpose |
+|------------|---------|---------------|---------|
+| **Python** | 3.8+ | [python.org/downloads](https://www.python.org/downloads/) | Run the application |
+| **Docker Desktop** | Latest | [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/) | Host Endee vector database |
+| **Git** | Latest | [git-scm.com/downloads](https://git-scm.com/downloads) | Clone repository |
+| **8GB RAM** | Minimum | - | Run embeddings & LLM |
+| **5GB Disk** | Free space | - | Store models & data |
+
+---
+
+### 🔧 Step-by-Step Installation
+
+#### **Step 1: Clone the Repository**
 
 ```bash
-# 1️⃣ Clone the repository
-git clone https://github.com/yourusername/assignment_rag.git
-cd assignment_rag
+# Clone the project
+git clone https://github.com/Vishal-gsu/rag-document-qa.git
 
-# 2️⃣ Create virtual environment
+# Navigate to project directory
+cd rag-document-qa
+
+# Verify files exist
+ls  # Should see: app.py, requirements.txt, docker-compose.yml, etc.
+```
+
+---
+
+#### **Step 2: Create Python Virtual Environment**
+
+**Why?** Isolates project dependencies from system Python.
+
+```bash
+# Create virtual environment
 python -m venv venv
 
-# Windows
-venv\Scripts\activate
+# Expected output: Creates 'venv' folder with Python binaries
+```
+
+**Activate the environment:**
+
+```bash
+# Windows (PowerShell)
+.\venv\Scripts\Activate.ps1
+
+# Windows (Command Prompt)
+venv\Scripts\activate.bat
 
 # macOS/Linux
 source venv/bin/activate
 
-# 3️⃣ Install dependencies
+# Verify activation: Your prompt should show (venv)
+# Example: (venv) PS C:\Users\YourName\rag-document-qa>
+```
+
+**Troubleshooting activation:**
+- Windows: If you get execution policy error, run:
+  ```powershell
+  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+  ```
+
+---
+
+#### **Step 3: Install Python Dependencies**
+
+```bash
+# Upgrade pip first (recommended)
+python -m pip install --upgrade pip
+
+# Install all required packages
 pip install -r requirements.txt
 
-# 4️⃣ Setup environment variables
+# This installs (~2-3 minutes):
+# - endee==0.1.8 (Vector database client)
+# - openai, groq (LLM providers)
+# - streamlit (Web interface)
+# - sentence-transformers (BAAI/bge-large-en-v1.5 embeddings)
+# - pypdf2, python-docx (Document parsers)
+# - numpy, scikit-learn (Vector operations)
+# + 20 more dependencies
+
+# Verify installation
+pip list | grep endee  # Should show: endee  0.1.8
+```
+
+**Expected time:** 2-5 minutes depending on internet speed
+
+**Common issues:**
+- If you see "No module named pip": `python -m ensurepip --upgrade`
+- If numpy fails on Windows: Install Microsoft C++ Build Tools
+
+---
+
+#### **Step 4: Configure Environment Variables**
+
+```bash
+# Create your environment file from template
 copy .env.example .env  # Windows
 # cp .env.example .env  # macOS/Linux
 
-# Edit .env and add your API key (choose one):
-# - GROQ_API_KEY=your_key_here (FREE - recommended!)
-# - OPENAI_API_KEY=your_key_here (paid)
-# Get Groq key: https://console.groq.com/keys
+# Open .env in your text editor
+notepad .env  # Windows
+# nano .env   # macOS/Linux
+```
 
-# 5️⃣ Start Endee vector database
+**Configure API Keys (Choose ONE option):**
+
+**Option A: Groq API (FREE - Recommended!)**
+```env
+GROQ_API_KEY=gsk_your_actual_groq_api_key_here
+OPENAI_API_KEY=  # Leave empty
+```
+- Get free key: https://console.groq.com/keys
+- No credit card required
+- 14,400 requests/day free tier
+
+**Option B: OpenAI API (Paid)**
+```env
+GROQ_API_KEY=  # Leave empty
+OPENAI_API_KEY=sk-proj-your_actual_openai_key_here
+```
+- Get key: https://platform.openai.com/api-keys
+- Costs ~$0.002 per query
+
+**Option C: Local Ollama (No API key needed)**
+```env
+GROQ_API_KEY=  # Leave empty
+OPENAI_API_KEY=  # Leave empty
+```
+- Install Ollama separately: https://ollama.com
+- Run: `ollama pull llama3.2`
+
+**Other settings (optional):**
+```env
+EMBEDDING_MODEL=sentence-transformers  # Uses BAAI/bge-large-en-v1.5 (1024D)
+CHUNK_SIZE=1000                        # Characters per text chunk
+CHUNK_OVERLAP=200                      # Overlap between chunks
+TOP_K_RESULTS=5                        # Number of chunks to retrieve
+```
+
+---
+
+#### **Step 5: Start Endee Vector Database**
+
+**Check Docker is running:**
+```bash
+docker --version  # Should show: Docker version 20.x or higher
+
+# If Docker not running:
+# Windows/Mac: Open Docker Desktop application
+# Linux: sudo systemctl start docker
+```
+
+**Start Endee:**
+```bash
+# Start Endee server in background
 docker compose up -d
 
-# 6️⃣ Run the application
+# Expected output:
+# [+] Running 2/2
+#  ✔ Network rag-document-qa_default  Created
+#  ✔ Container endee-server           Started
+```
+
+**Verify Endee is running:**
+```bash
+# Check container status
+docker ps
+
+# Should show:
+# CONTAINER ID   IMAGE                          STATUS         PORTS
+# abc123def456   endeeio/endee-server:latest   Up 10 seconds  0.0.0.0:8080->8080/tcp
+
+# Test Endee API
+curl http://localhost:8080/health
+# Expected: {"status":"ok"}
+```
+
+**View Endee logs (if issues):**
+```bash
+docker logs endee-server -f
+# Press Ctrl+C to exit logs
+```
+
+---
+
+#### **Step 6: Launch the Application**
+
+```bash
+# Make sure you're in the project directory and venv is activated
+
+# Run Streamlit app
+streamlit run app.py
+
+# Expected output:
+#   You can now view your Streamlit app in your browser.
+#
+#   Local URL: http://localhost:8501
+#   Network URL: http://192.168.x.x:8501
+
+# First run downloads BAAI/bge-large-en-v1.5 model (~400MB, 1-2 min)
+```
+
+**🎉 Success!** 
+- Open browser to: **http://localhost:8501**
+- You should see the RAG Document Q&A interface
+
+---
+
+### 🧪 Verify Installation
+
+**Quick verification checklist:**
+
+1. ✅ Python environment activated: `(venv)` in prompt
+2. ✅ Dependencies installed: `pip show endee` shows version 0.1.8
+3. ✅ Docker running: `docker ps` shows endee-server container
+4. ✅ Endee responding: `curl http://localhost:8080/health`
+5. ✅ Streamlit accessible: http://localhost:8501 loads
+6. ✅ Can upload documents: Test with sample files in `data/documents/`
+7. ✅ Can ask questions: Try "What is machine learning?"
+
+---
+
+### 🔄 Managing the Application
+
+**Stop everything:**
+```bash
+# Stop Streamlit: Press Ctrl+C in terminal
+
+# Stop Endee (keeps data)
+docker compose stop
+
+# Stop Endee (removes data)
+docker compose down
+```
+
+**Restart:**
+```bash
+# Start Endee
+docker compose up -d
+
+# Activate environment
+.\venv\Scripts\Activate.ps1  # Windows
+# source venv/bin/activate    # macOS/Linux
+
+# Run app
 streamlit run app.py
 ```
 
-**🎉 Done!** Open http://localhost:8501 in your browser
+**Update code:**
+```bash
+git pull origin main
+pip install -r requirements.txt --upgrade
+docker compose pull  # Update Endee image
+```
 
 ---
 
@@ -363,8 +667,8 @@ docker ps
 | **Indexing Time** | ~2 min (500 documents) |
 | **Query Latency (P50)** | 1.8s with Groq, 2.5s with OpenAI |
 | **Retrieval Accuracy** | 65-75% similarity scores |
-| **Database Size** | ~10MB for 2,400 vectors (384D) |
-| **Memory Usage** | ~500MB (embeddings loaded in RAM) |
+| **Database Size** | ~27MB for 2,400 vectors (1024D BGE) |
+| **Memory Usage** | ~800MB (BGE embeddings loaded in RAM) |
 
 ---
 

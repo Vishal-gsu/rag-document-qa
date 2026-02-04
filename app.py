@@ -361,13 +361,13 @@ with tab3:
     
     embedding_choice = st.radio(
         "Choose Embedding Provider:",
-        ["☁️ OpenAI API (text-embedding-3-small)", "💻 Local (all-MiniLM-L6-v2 - Free)"],
+        ["☁️ OpenAI API (text-embedding-3-small)", "💻 Local (BAAI/bge-large-en-v1.5 - 1024D Free)"],
         help="Embeddings convert text to vectors. OpenAI requires API key. Local model is free but needs sentence-transformers."
     )
     
     if embedding_choice.startswith("💻"):
         st.session_state.use_local_embeddings = True
-        st.info("✓ Using local embeddings (all-MiniLM-L6-v2). First run will download ~80MB model.")
+        st.info("✓ Using local embeddings (BAAI/bge-large-en-v1.5, 1024D). First run will download ~400MB model.")
         if st.button("Install sentence-transformers", help="Required for local embeddings"):
             with st.spinner("Installing sentence-transformers..."):
                 import subprocess
