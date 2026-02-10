@@ -228,7 +228,7 @@ rag\Scripts\activate
 pip install -r requirements.txt
 
 # 3. Start Endee vector database
-docker-compose up -d endee_db
+docker-compose up -d endee
 
 # 4. Configure environment
 cp .env.example .env
@@ -401,15 +401,7 @@ assignment_rag/
 │   ├── test_phase3.py        # Conversation tests
 │   ├── test_phase4.py        # Persona tests
 │   └── test_phase5.py        # Routing tests
-│
-├── docs/
-│   ├── ARCHITECTURE.md       # Detailed architecture docs
-│   ├── 00_STUDY_GUIDE.md     # Learning resources
-│   ├── 01_PROJECT_OVERVIEW.md
-│   ├── 02_CORE_CONCEPTS.md
-│   ├── 03_ENDEE_INTEGRATION.md
-│   └── ...
-│
+|
 └── examples/
     ├── interview_demo.py     # Interactive demonstration script
     └── demo.py               # Basic usage examples
