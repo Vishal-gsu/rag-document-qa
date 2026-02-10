@@ -1,0 +1,3 @@
+PLACEHOLDER - Replace this file with your architecture diagram
+Download a RAG architecture diagram from online (e.g., from Lucidchart, Draw.io)
+Or create one showing: Documents → Embeddings → Vector DB → Retrieval → LLM → Answer

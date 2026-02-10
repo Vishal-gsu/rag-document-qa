@@ -43,17 +43,9 @@ if "system_prompt" not in st.session_state:
 if "uploaded_files_list" not in st.session_state:
     st.session_state.uploaded_files_list = []
 
-if "use_local_embeddings" not in st.session_state:
-    st.session_state.use_local_embeddings = True  # Default to BGE embeddings (FREE)
+# Removed use_local_embeddings - always use local BGE embeddings
 
-if "top_k_results" not in st.session_state:
-    st.session_state.top_k_results = Config.TOP_K_RESULTS
-
-if "temperature" not in st.session_state:
-    st.session_state.temperature = 0.7
-
-if "max_tokens" not in st.session_state:
-    st.session_state.max_tokens = 500
+# Removed top_k, temperature, max_tokens - controlled by persona
 
 if "similarity_threshold" not in st.session_state:
     st.session_state.similarity_threshold = 0.4
@@ -78,11 +70,11 @@ def initialize_rag():
     """Initialize RAG engine if not already done."""
     if st.session_state.rag_engine is None:
         try:
-            # Initialize with local embeddings if selected
+            # Always use local BGE embeddings (free, state-of-the-art)
             from embedding_engine import EmbeddingEngine
-            embedding_engine = EmbeddingEngine(use_local=st.session_state.use_local_embeddings)
+            embedding_engine = EmbeddingEngine(use_local=True)
             
-            # Create RAG engine with custom embedding engine
+            # Create RAG engine with local embeddings
             st.session_state.rag_engine = RAGEngine()
             st.session_state.rag_engine.embedding_engine = embedding_engine
             return True
@@ -319,22 +311,70 @@ with tab2:
                         st.session_state.selected_collections = None
                         st.info("🤖 Auto-routing enabled - collections selected based on query intent")
             
-            # Display conversation history from ConversationManager
+            # Display conversation history from ConversationManager (Enhanced Phase 6)
             if st.session_state.rag_engine and hasattr(st.session_state.rag_engine, 'conversation_manager'):
                 if st.session_state.rag_engine.conversation_manager:
                     history = st.session_state.rag_engine.conversation_manager.get_history(st.session_state.session_id)
                     
                     if history:
                         st.markdown("### 💭 Conversation History")
-                        for turn in history:
-                            st.markdown(f"**You:** {turn['question']}")
-                            st.markdown(f"**Assistant:** {turn['answer'][:300]}...")
+                        
+                        # Show summary stats
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Total Questions", len(history))
+                        with col2:
+                            rewritten_count = sum(1 for h in history if h.get('metadata', {}).get('rewritten_query'))
+                            st.metric("Rewrites", rewritten_count)
+                        with col3:
+                            avg_sources = sum(len(h.get('metadata', {}).get('sources', [])) for h in history) / max(len(history), 1)
+                            st.metric("Avg Sources", f"{avg_sources:.1f}")
+                        
+                        st.markdown("---")
+                        
+                        # Timeline view
+                        for idx, turn in enumerate(history):
+                            turn_number = idx + 1
                             
-                            # Show if query was rewritten
-                            if turn.get('metadata', {}).get('rewritten_query'):
-                                with st.expander("🔄 Query was rewritten"):
-                                    st.text(f"Original: {turn['question']}")
-                                    st.text(f"Rewritten: {turn['metadata']['rewritten_query']}")
+                            # Question with timestamp
+                            col_q, col_time = st.columns([5, 1])
+                            with col_q:
+                                st.markdown(f"**Q{turn_number}:** {turn['question']}")
+                            with col_time:
+                                timestamp = turn.get('timestamp', 'N/A')
+                                if isinstance(timestamp, str) and timestamp != 'N/A':
+                                    # Just show time part if available
+                                    time_part = timestamp.split('T')[-1][:8] if 'T' in timestamp else timestamp[:8]
+                                    st.caption(time_part)
+                            
+                            # Answer (collapsible for long answers)
+                            answer_preview = turn['answer'][:200]
+                            if len(turn['answer']) > 200:
+                                with st.expander(f"**A{turn_number}:** {answer_preview}..."):
+                                    st.markdown(turn['answer'])
+                            else:
+                                st.markdown(f"**A{turn_number}:** {turn['answer']}")
+                            
+                            # Enhanced metadata display
+                            meta_items = []
+                            metadata = turn.get('metadata', {})
+                            
+                            if metadata.get('rewritten_query'):
+                                meta_items.append(f"🔄 Rewritten: `{metadata['rewritten_query']}`")
+                            
+                            if metadata.get('persona'):
+                                meta_items.append(f"👤 {metadata['persona'].title()}")
+                            
+                            if metadata.get('collections_searched'):
+                                collections = ', '.join(metadata['collections_searched'])
+                                meta_items.append(f"🗂️ {collections}")
+                            
+                            if metadata.get('routing_confidence'):
+                                conf = metadata['routing_confidence']
+                                meta_items.append(f"🎯 Confidence: {conf:.0%}")
+                            
+                            if meta_items:
+                                st.caption(" • ".join(meta_items))
                             
                             st.markdown("---")
             
@@ -359,6 +399,9 @@ with tab2:
             if ask_button and question:
                 with st.spinner("Thinking..."):
                     try:
+                        import time
+                        start_time = time.time()
+                        
                         # Use RAG engine's query method with all features
                         result = st.session_state.rag_engine.query(
                             question=question,
@@ -373,20 +416,63 @@ with tab2:
                             auto_route=st.session_state.enable_auto_routing
                         )
                         
+                        query_time = time.time() - start_time
+                        
                         answer = result['answer']
                         filtered_results = result['context']
                         
                         if not filtered_results:
                             st.error("No relevant information found.")
                         else:
+                            # Performance Dashboard (Phase 6)
+                            st.markdown("### 📊 Query Performance")
+                            perf_col1, perf_col2, perf_col3, perf_col4 = st.columns(4)
+                            
+                            with perf_col1:
+                                st.metric("⏱️ Total Time", f"{query_time:.2f}s")
+                            with perf_col2:
+                                st.metric("📄 Sources", len(filtered_results))
+                            with perf_col3:
+                                avg_score = sum(r['score'] for r in filtered_results) / len(filtered_results)
+                                st.metric("🎯 Avg Score", f"{avg_score:.0%}")
+                            with perf_col4:
+                                used_persona = result.get('metadata', {}).get('persona', st.session_state.current_persona)
+                                st.metric("👤 Persona", used_persona.title())
+                            
+                            # Routing Explanation (Phase 6)
+                            if st.session_state.enable_auto_routing and result.get('metadata', {}).get('routing_explanation'):
+                                with st.expander("🧭 Routing Decision", expanded=False):
+                                    routing_info = result['metadata']
+                                    st.markdown(f"**Query:** {question}")
+                                    st.markdown(f"**Explanation:** {routing_info.get('routing_explanation', 'N/A')}")
+                                    
+                                    if routing_info.get('collections_searched'):
+                                        collections_str = ', '.join(routing_info['collections_searched'])
+                                        st.markdown(f"**Collections Searched:** {collections_str}")
+                                    
+                                    if routing_info.get('routing_confidence'):
+                                        conf = routing_info['routing_confidence']
+                                        confidence_color = "🟢" if conf > 0.7 else "🟡" if conf > 0.5 else "🟠"
+                                        st.markdown(f"**Confidence:** {confidence_color} {conf:.0%}")
+                                    
+                                    # Show all collection scores if available
+                                    if hasattr(st.session_state.rag_engine, 'query_router'):
+                                        all_scores = st.session_state.rag_engine.query_router.get_intent_confidence(question)
+                                        if all_scores:
+                                            st.markdown("**All Collection Scores:**")
+                                            for coll, score in sorted(all_scores.items(), key=lambda x: x[1], reverse=True):
+                                                bar_width = int(score * 20)
+                                                bar = "█" * bar_width + "░" * (20 - bar_width)
+                                                st.text(f"{coll:20s} {bar} {score:.0%}")
+                            
                             # Display answer
                             st.markdown("### 💡 Answer")
                             st.markdown(answer)
                             
                             # Display sources
                             st.markdown(f"### 📚 Sources (showing {len(filtered_results)} most relevant)")
-                            for i, result in enumerate(filtered_results):
-                                sim_score = result['score']
+                            for i, result_item in enumerate(filtered_results):
+                                sim_score = result_item['score']
                                 # Color code by similarity
                                 if sim_score >= 0.7:
                                     emoji = "🟢"
@@ -395,29 +481,85 @@ with tab2:
                                 else:
                                     emoji = "🟠"
                                 
-                                with st.expander(f"{emoji} Source {i+1}: {result['metadata'].get('filename', 'Unknown')} (Similarity: {sim_score:.1%})"):
-                                    st.text(result['text'])
+                                # Add collection tag if multi-collection
+                                collection_tag = ""
+                                if result_item['metadata'].get('collection'):
+                                    coll_icons = {
+                                        'research_papers': '📄',
+                                        'resumes': '👤',
+                                        'textbooks': '📚',
+                                        'general_docs': '📁'
+                                    }
+                                    coll_name = result_item['metadata']['collection']
+                                    collection_tag = f" {coll_icons.get(coll_name, '📄')} [{coll_name}]"
+                                
+                                with st.expander(f"{emoji} Source {i+1}: {result_item['metadata'].get('filename', 'Unknown')}{collection_tag} (Similarity: {sim_score:.1%})"):
+                                    st.text(result_item['text'])
+                                    
+                                    # Show additional metadata
+                                    meta_info = []
+                                    if result_item['metadata'].get('chunk_index') is not None:
+                                        meta_info.append(f"Chunk #{result_item['metadata']['chunk_index'] + 1}")
+                                    if result_item['metadata'].get('doc_type'):
+                                        meta_info.append(f"Type: {result_item['metadata']['doc_type']}")
+                                    if meta_info:
+                                        st.caption(" | ".join(meta_info))
                             
-                            # Export option
+                            # Enhanced Export (Phase 6)
                             export_data = {
                                 "question": question,
                                 "answer": answer,
                                 "session_id": st.session_state.session_id,
+                                "query_time_seconds": query_time,
+                                "persona": used_persona,
+                                "routing": {
+                                    "enabled": st.session_state.enable_auto_routing,
+                                    "collections_searched": result.get('metadata', {}).get('collections_searched', []),
+                                    "confidence": result.get('metadata', {}).get('routing_confidence'),
+                                    "explanation": result.get('metadata', {}).get('routing_explanation')
+                                },
                                 "sources": [
                                     {
                                         "file": r['metadata'].get('filename', 'Unknown'),
+                                        "collection": r['metadata'].get('collection'),
                                         "similarity": r['score'],
-                                        "text": r['text']
+                                        "text": r['text'],
+                                        "chunk_index": r['metadata'].get('chunk_index')
                                     }
                                     for r in filtered_results
-                                ]
+                                ],
+                                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                             }
-                            st.download_button(
-                                "📥 Download Result (JSON)",
-                                data=json.dumps(export_data, indent=2),
-                                file_name=f"rag_result_{st.session_state.session_id[:8]}.json",
-                                mime="application/json"
-                            )
+                            
+                            col_export1, col_export2 = st.columns(2)
+                            with col_export1:
+                                st.download_button(
+                                    "📥 Download Result (JSON)",
+                                    data=json.dumps(export_data, indent=2),
+                                    file_name=f"rag_result_{st.session_state.session_id[:8]}.json",
+                                    mime="application/json",
+                                    use_container_width=True
+                                )
+                            with col_export2:
+                                # Export full conversation
+                                if st.button("💾 Export Full Conversation", use_container_width=True):
+                                    if st.session_state.rag_engine.conversation_manager:
+                                        full_history = st.session_state.rag_engine.conversation_manager.get_history(st.session_state.session_id)
+                                        conversation_export = {
+                                            "session_id": st.session_state.session_id,
+                                            "total_turns": len(full_history),
+                                            "persona": st.session_state.current_persona,
+                                            "conversation": full_history,
+                                            "exported_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                                        }
+                                        st.download_button(
+                                            "📥 Download Conversation",
+                                            data=json.dumps(conversation_export, indent=2),
+                                            file_name=f"conversation_{st.session_state.session_id[:8]}.json",
+                                            mime="application/json",
+                                            use_container_width=True,
+                                            key="download_conversation"
+                                        )
                             
                     except Exception as e:
                         st.error(f"Error: {e}")
@@ -458,32 +600,18 @@ with tab3:
     
     st.markdown("---")
     
-    # Embedding Model Selection
+    # Embedding Model Info (Fixed to BGE)
     st.subheader("🔢 Embedding Model")
     
-    embedding_choice = st.radio(
-        "Choose Embedding Provider:",
-        ["☁️ OpenAI API (text-embedding-3-small)", "💻 Local (BAAI/bge-large-en-v1.5 - 1024D Free)"],
-        help="Embeddings convert text to vectors. OpenAI requires API key. Local model is free but needs sentence-transformers."
+    st.success("✓ **Using BAAI/bge-large-en-v1.5** (1024D, state-of-the-art, FREE)")
+    st.info(
+        "**Why BGE?**\n\n"
+        "• Top-ranked on MTEB benchmark\n"
+        "• 1024-dimensional embeddings\n"
+        "• No API costs or rate limits\n"
+        "• First run downloads ~400MB model (one-time)\n\n"
+        "If not installed, run: `pip install sentence-transformers`"
     )
-    
-    if embedding_choice.startswith("💻"):
-        st.session_state.use_local_embeddings = True
-        st.info("✓ Using local embeddings (BAAI/bge-large-en-v1.5, 1024D). First run will download ~400MB model.")
-        if st.button("Install sentence-transformers", help="Required for local embeddings"):
-            with st.spinner("Installing sentence-transformers..."):
-                import subprocess
-                subprocess.run(["pip", "install", "sentence-transformers"])
-                st.success("✓ Installed! Restart the app.")
-    else:
-        st.session_state.use_local_embeddings = False
-        st.info("Using OpenAI embeddings. Requires API key below.")
-    
-    # Reset RAG engine when embedding model changes
-    if st.button("Apply Embedding Model"):
-        st.session_state.rag_engine = None
-        if initialize_rag():
-            st.success(f"✓ Embeddings configured!")
     
     st.markdown("---")
     
@@ -630,72 +758,56 @@ with tab3:
     
     st.markdown("---")
     
-    # Generation Parameters
+    # RAG Parameters Info (Controlled by Persona)
     st.subheader("🎚️ RAG Parameters")
-    st.markdown("Configure retrieval and generation settings (applied immediately to queries)")
+    st.info(
+        "📊 **Parameters are controlled by User Persona** (see Query tab sidebar)\n\n"
+        "Current persona adjusts these automatically:\n"
+        "• **Top-K**: Number of documents retrieved\n"
+        "• **Temperature**: Creativity vs focus\n"
+        "• **Max Tokens**: Answer length\n"
+        "• **Strategy**: Retrieval approach\n\n"
+        "Switch persona in the Query tab to change these settings."
+    )
     
-    col1, col2, col3 = st.columns(3)
+    # Show current persona settings
+    if st.session_state.rag_engine and hasattr(st.session_state.rag_engine, 'persona_manager'):
+        if st.session_state.rag_engine.persona_manager:
+            profile = st.session_state.rag_engine.persona_manager.get_profile(st.session_state.current_persona)
+            
+            st.markdown(f"### 👤 Current Persona: **{st.session_state.current_persona.title()}**")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Top-K", profile.top_k)
+            with col2:
+                st.metric("Temperature", f"{profile.temperature}")
+            with col3:
+                st.metric("Max Tokens", profile.max_tokens)
+            with col4:
+                st.metric("Strategy", profile.retrieval_strategy.replace('_', ' ').title())
     
-    with col1:
-        similarity_threshold = st.slider(
-            "Similarity Threshold:",
-            min_value=0.0,
-            max_value=1.0,
-            value=st.session_state.similarity_threshold,
-            step=0.05,
-            help="Only use chunks above this similarity. Higher = more strict, Lower = more results"
-        )
-        st.caption(f"🎯 Current: {similarity_threshold:.0%} - {'Strict' if similarity_threshold >= 0.6 else 'Moderate' if similarity_threshold >= 0.4 else 'Lenient'}")
-    
-    with col2:
-        temperature = st.slider(
-            "Temperature:",
-            min_value=0.0,
-            max_value=1.0,
-            value=st.session_state.temperature,
-            step=0.1,
-            help="Higher = more creative, Lower = more focused"
-        )
-    
-    with col3:
-        top_k = st.number_input(
-            "Retrieve Top-K:",
-            min_value=1,
-            max_value=10,
-            value=st.session_state.top_k_results,
-            help="Number of context chunks to retrieve"
-        )
+    # Similarity threshold (not persona-controlled)
+    st.markdown("### 🎯 Similarity Threshold")
+    similarity_threshold = st.slider(
+        "Minimum similarity score for retrieved documents:",
+        min_value=0.0,
+        max_value=1.0,
+        value=st.session_state.similarity_threshold,
+        step=0.05,
+        help="Only use chunks above this similarity. Higher = more strict, Lower = more results"
+    )
+    st.caption(f"Current: {similarity_threshold:.0%} - {'Strict' if similarity_threshold >= 0.6 else 'Moderate' if similarity_threshold >= 0.4 else 'Lenient'}")
     
     col1, col2 = st.columns(2)
-    
     with col1:
-        max_tokens = st.number_input(
-            "Max Tokens:",
-            min_value=100,
-            max_value=2000,
-            value=st.session_state.max_tokens,
-            step=100,
-            help="Maximum length of generated answer"
-        )
-    
-    # Save to session state
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("💾 Save Parameters", type="primary"):
+        if st.button("💾 Save Threshold", type="primary"):
             st.session_state.similarity_threshold = similarity_threshold
-            st.session_state.temperature = temperature
-            st.session_state.max_tokens = max_tokens
-            st.session_state.top_k_results = top_k
-            st.success("✓ Parameters saved and will be applied to next query!")
-    
+            st.success("✓ Threshold saved!")
     with col2:
-        if st.button("🔄 Reset to Defaults"):
+        if st.button("🔄 Reset to Default"):
             st.session_state.similarity_threshold = 0.4
-            st.session_state.temperature = 0.7
-            st.session_state.max_tokens = 500
-            st.session_state.top_k_results = 5
-            st.success("✓ Reset to default values!")
+            st.success("✓ Reset to 40%!")
             st.rerun()
     
     st.info("ℹ️ **Note:** Chunk Size (1000) and Overlap (200) are fixed in config to maintain database consistency.")
