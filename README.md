@@ -82,13 +82,17 @@ This system implements a sophisticated RAG pipeline with 5 key innovations:
 
 ```
 User Query → Query Router → Collection Selection → Query Rewriter
-     ↓
+
+                             ↓
 Embedding Engine → Vector Search (HNSW) → Multi-Collection Retrieval
-     ↓
+
+                             ↓
 Persona Manager → Retrieval Parameters (top_k, threshold)
-     ↓
+
+                             ↓
 Context Aggregation → LLM Prompt Generation → Answer Generation
-     ↓
+
+                             ↓
 Conversation Manager → Memory Update → Return Result
 ```
 
@@ -210,7 +214,7 @@ Query: "What Python experience do candidates have?"
 
 ```bash
 # 1. Clone repository
-https://github.com/Vishal-gsu/rag-document-qa
+git clone https://github.com/Vishal-gsu/rag-document-qa
 cd rag-document-qa
 
 # 2. Install dependencies
