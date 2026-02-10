@@ -42,6 +42,18 @@ if "uploaded_files_list" not in st.session_state:
 if "use_local_embeddings" not in st.session_state:
     st.session_state.use_local_embeddings = True  # Default to BGE embeddings (FREE)
 
+if "top_k_results" not in st.session_state:
+    st.session_state.top_k_results = Config.TOP_K_RESULTS
+
+if "temperature" not in st.session_state:
+    st.session_state.temperature = 0.7
+
+if "max_tokens" not in st.session_state:
+    st.session_state.max_tokens = 500
+
+if "similarity_threshold" not in st.session_state:
+    st.session_state.similarity_threshold = 0.4
+
 
 def initialize_rag():
     """Initialize RAG engine if not already done."""
@@ -226,22 +238,21 @@ with tab2:
                         question_embedding = st.session_state.rag_engine.embedding_engine.embed_text(question)
                         results = st.session_state.rag_engine.vector_store.search(
                             query_vector=question_embedding,
-                            top_k=5  # Retrieve more, filter by threshold
+                            top_k=st.session_state.top_k_results
                         )
                         
                         if not results:
                             st.error("No relevant information found.")
                         else:
                             # Filter by similarity threshold
-                            SIMILARITY_THRESHOLD = 0.3  # 30% - balanced threshold
-                            filtered_results = [r for r in results if r['score'] >= SIMILARITY_THRESHOLD]
+                            filtered_results = [r for r in results if r['score'] >= st.session_state.similarity_threshold]
                             
                             # Debug: Show all scores
                             scores_str = [f"{r['score']:.2f}" for r in results[:5]]
                             st.info(f"🔍 Debug: Retrieved {len(results)} results. Top 5 scores: {scores_str}")
                             
                             if not filtered_results:
-                                st.warning(f"⚠️ No results above {SIMILARITY_THRESHOLD:.0%} similarity. Try rephrasing your question.")
+                                st.warning(f"⚠️ No results above {st.session_state.similarity_threshold:.0%} similarity. Try rephrasing your question.")
                                 st.info("💡 Tip: Be more specific. Instead of 'this resume', try 'Vishal Kumar's experience' or 'What are the skills?'")
                             else:
                                 # Build context from filtered results only
@@ -264,8 +275,8 @@ Provide a comprehensive answer using the information above. Include relevant det
                                 # Generate answer using LLM manager
                                 answer = st.session_state.llm_manager.generate(
                                 messages=messages,
-                                temperature=0.4,  # Balanced creativity
-                                max_tokens=800  # Allow detailed answers
+                                temperature=st.session_state.temperature,
+                                max_tokens=st.session_state.max_tokens
                             )
                             
                                 # Update conversation history
@@ -530,6 +541,7 @@ with tab3:
     
     # Generation Parameters
     st.subheader("🎚️ RAG Parameters")
+    st.markdown("Configure retrieval and generation settings (applied immediately to queries)")
     
     col1, col2, col3 = st.columns(3)
     
@@ -538,7 +550,7 @@ with tab3:
             "Similarity Threshold:",
             min_value=0.0,
             max_value=1.0,
-            value=0.4,
+            value=st.session_state.similarity_threshold,
             step=0.05,
             help="Only use chunks above this similarity. Higher = more strict, Lower = more results"
         )
@@ -549,38 +561,53 @@ with tab3:
             "Temperature:",
             min_value=0.0,
             max_value=1.0,
-            value=0.7,
+            value=st.session_state.temperature,
             step=0.1,
             help="Higher = more creative, Lower = more focused"
         )
     
-    col1, col2, col3 = st.columns(3)
+    with col3:
+        top_k = st.number_input(
+            "Retrieve Top-K:",
+            min_value=1,
+            max_value=10,
+            value=st.session_state.top_k_results,
+            help="Number of context chunks to retrieve"
+        )
+    
+    col1, col2 = st.columns(2)
     
     with col1:
         max_tokens = st.number_input(
             "Max Tokens:",
             min_value=100,
             max_value=2000,
-            value=500,
+            value=st.session_state.max_tokens,
             step=100,
             help="Maximum length of generated answer"
         )
     
-    with col2:
-        top_k = st.number_input(
-            "Retrieve Top-K:",
-            min_value=1,
-            max_value=10,
-            value=5,
-            help="Number of context chunks to retrieve"
-        )
+    # Save to session state
+    col1, col2 = st.columns(2)
     
-    # Save to config
-    if st.button("💾 Save Parameters"):
-        Config.TEMPERATURE = temperature
-        Config.MAX_TOKENS = max_tokens
-        Config.TOP_K_RESULTS = top_k
-        st.success("✓ Parameters saved")
+    with col1:
+        if st.button("💾 Save Parameters", type="primary"):
+            st.session_state.similarity_threshold = similarity_threshold
+            st.session_state.temperature = temperature
+            st.session_state.max_tokens = max_tokens
+            st.session_state.top_k_results = top_k
+            st.success("✓ Parameters saved and will be applied to next query!")
+    
+    with col2:
+        if st.button("🔄 Reset to Defaults"):
+            st.session_state.similarity_threshold = 0.4
+            st.session_state.temperature = 0.7
+            st.session_state.max_tokens = 500
+            st.session_state.top_k_results = 5
+            st.success("✓ Reset to default values!")
+            st.rerun()
+    
+    st.info("ℹ️ **Note:** Chunk Size (1000) and Overlap (200) are fixed in config to maintain database consistency.")
 
 # ============================================================================
 # TAB 4: INTERACTIVE TESTS
