@@ -1,13 +1,16 @@
 """
 RAG Engine Module
 Orchestrates the complete RAG pipeline: retrieval + generation.
+Supports multi-collection architecture for document type segregation.
 """
 from typing import List, Dict, Optional
 from openai import OpenAI
+from datetime import datetime
 from config import Config
 from document_processor import DocumentProcessor
 from embedding_engine import EmbeddingEngine
 from vector_store import VectorStore
+from document_classifier import DocumentClassifier
 
 
 class RAGEngine:
@@ -19,28 +22,50 @@ class RAGEngine:
     def __init__(self, 
                  db_path: str = None,
                  collection_name: str = None,
-                 chat_model: str = None):
+                 chat_model: str = None,
+                 enable_multi_collection: bool = None):
         """
         Initialize RAG engine.
         
         Args:
             db_path: Path to vector database
-            collection_name: Name of the collection
+            collection_name: Name of the default collection
             chat_model: OpenAI chat model to use
+            enable_multi_collection: Enable multi-collection mode
         """
         # Validate configuration
         Config.validate()
         
+        # Determine multi-collection mode
+        if enable_multi_collection is None:
+            enable_multi_collection = Config.ENABLE_MULTI_COLLECTION
+        
+        self.enable_multi_collection = enable_multi_collection
+        
         # Initialize components
         self.embedding_engine = EmbeddingEngine()
+        
+        # Document classifier (for multi-collection mode)
+        self.classifier = None
+        if enable_multi_collection and Config.ENABLE_AUTO_CLASSIFICATION:
+            self.classifier = DocumentClassifier()
+            print("✓ Document classifier enabled")
+        
         self.vector_store = VectorStore(
             db_path=db_path or Config.ENDEE_DB_PATH,
-            collection_name=collection_name or Config.COLLECTION_NAME
+            collection_name=collection_name or Config.COLLECTION_NAME,
+            enable_multi_collection=enable_multi_collection
         )
         self.document_processor = DocumentProcessor(
             chunk_size=Config.CHUNK_SIZE,
-            chunk_overlap=Config.CHUNK_OVERLAP
+            chunk_overlap=Config.CHUNK_OVERLAP,
+            classifier=self.classifier,
+            enable_specialized_parsing=Config.ENABLE_SPECIALIZED_PARSING
         )
+        
+        # Multi-collection mode status
+        if enable_multi_collection:
+            print("✓ Multi-collection mode enabled")
         
         # LLM client
         self.chat_model = chat_model or Config.CHAT_MODEL
@@ -97,16 +122,70 @@ class RAGEngine:
         
         # Step 4: Store in vector database
         print("Step 4: Storing in vector database...")
-        # Extract vectors and metadata for Endee
+        
+        # CRITICAL FIX: Preserve ALL metadata fields, not just text and filename
         vectors = [doc['embedding'] for doc in chunks_with_embeddings]
-        metadata = [{'text': doc['text'], 'filename': doc['metadata'].get('filename', 'Unknown')} 
-                   for doc in chunks_with_embeddings]
         
-        # Generate IDs starting from current vector count
-        start_id = self.vector_store.vector_count
-        ids = [f"doc_{start_id + i}" for i in range(len(chunks_with_embeddings))]
+        # Enhanced metadata with all fields + indexing timestamp
+        metadata = []
+        for doc in chunks_with_embeddings:
+            meta = {
+                'text': doc['text'],
+                'filename': doc['metadata'].get('filename', 'Unknown'),
+                'source': doc['metadata'].get('source', ''),
+                'type': doc['metadata'].get('type', ''),
+                'chunk_id': doc['metadata'].get('chunk_id', 0),
+                'total_chunks': doc['metadata'].get('total_chunks', 1),
+                'indexed_at': datetime.now().isoformat()
+            }
+            
+            # Add doc_type if in multi-collection mode
+            if self.enable_multi_collection and 'doc_type' in doc['metadata']:
+                meta['doc_type'] = doc['metadata']['doc_type']
+            
+            metadata.append(meta)
         
-        self.vector_store.add_vectors(vectors=vectors, metadata=metadata, ids=ids)
+        # If multi-collection mode, route to appropriate collections
+        if self.enable_multi_collection:
+            # Group chunks by document type
+            chunks_by_type = {}
+            for i, doc in enumerate(chunks_with_embeddings):
+                doc_type = doc['metadata'].get('doc_type', 'generic')
+                if doc_type not in chunks_by_type:
+                    chunks_by_type[doc_type] = {
+                        'vectors': [],
+                        'metadata': [],
+                        'ids': []
+                    }
+                
+                chunks_by_type[doc_type]['vectors'].append(vectors[i])
+                chunks_by_type[doc_type]['metadata'].append(metadata[i])
+            
+            # Add to appropriate collections
+            for doc_type, data in chunks_by_type.items():
+                collection_name = Config.get_collection_name(doc_type)
+                
+                # Generate IDs for this collection
+                if collection_name in self.vector_store.collections:
+                    start_id = self.vector_store.collections[collection_name]['vector_count']
+                else:
+                    start_id = 0
+                
+                data['ids'] = [f"{collection_name}_{start_id + i}" for i in range(len(data['vectors']))]
+                
+                print(f"  → Adding {len(data['vectors'])} vectors to '{collection_name}' collection")
+                self.vector_store.add_vectors_to_collection(
+                    collection_name=collection_name,
+                    vectors=data['vectors'],
+                    metadata=data['metadata'],
+                    ids=data['ids']
+                )
+        else:
+            # Legacy single-collection mode
+            start_id = self.vector_store.vector_count
+            ids = [f"doc_{start_id + i}" for i in range(len(chunks_with_embeddings))]
+            
+            self.vector_store.add_vectors(vectors=vectors, metadata=metadata, ids=ids)
         
         print(f"\n{'='*60}")
         print("✓ INDEXING COMPLETE")

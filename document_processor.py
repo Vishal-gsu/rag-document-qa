@@ -1,25 +1,46 @@
 """
 Document Processor Module
 Handles loading and chunking of various document formats.
+Integrates specialized parsers for different document types.
 """
 import os
 from typing import List, Dict
 from pathlib import Path
+from parsers import GenericParser, ResearchPaperParser, ResumeParser, TextbookParser
 
 
 class DocumentProcessor:
     """Process and chunk documents for RAG system."""
     
-    def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50):
+    def __init__(self, 
+                 chunk_size: int = 500, 
+                 chunk_overlap: int = 50,
+                 classifier = None,
+                 enable_specialized_parsing: bool = True):
         """
         Initialize document processor.
         
         Args:
             chunk_size: Maximum characters per chunk
             chunk_overlap: Character overlap between chunks
+            classifier: DocumentClassifier instance for type detection
+            enable_specialized_parsing: Use specialized parsers for different doc types
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        self.classifier = classifier
+        self.enable_specialized_parsing = enable_specialized_parsing
+        
+        # Initialize parser registry
+        self.parser_registry = {
+            'research_paper': ResearchPaperParser(chunk_size, chunk_overlap),
+            'resume': ResumeParser(chunk_size, chunk_overlap),
+            'textbook': TextbookParser(chunk_size, chunk_overlap),
+            'generic': GenericParser(chunk_size, chunk_overlap)
+        }
+        
+        if enable_specialized_parsing:
+            print("✓ Specialized parsers enabled")
     
     def load_documents(self, directory: str) -> List[Dict[str, str]]:
         """
@@ -44,13 +65,22 @@ class DocumentProcessor:
             if file_path.suffix.lower() in supported_extensions:
                 try:
                     content = self._load_file(file_path)
+                    
+                    # Base metadata
+                    metadata = {
+                        'source': str(file_path),
+                        'filename': file_path.name,
+                        'type': file_path.suffix
+                    }
+                    
+                    # Add document type classification if classifier available
+                    if self.classifier:
+                        doc_type = self.classifier.classify(file_path=file_path, content=content)
+                        metadata['doc_type'] = doc_type
+                    
                     documents.append({
                         'content': content,
-                        'metadata': {
-                            'source': str(file_path),
-                            'filename': file_path.name,
-                            'type': file_path.suffix
-                        }
+                        'metadata': metadata
                     })
                     print(f"✓ Loaded: {file_path.name}")
                 except Exception as e:
@@ -110,6 +140,7 @@ class DocumentProcessor:
     def chunk_documents(self, documents: List[Dict[str, str]]) -> List[Dict[str, any]]:
         """
         Split documents into chunks for embedding.
+        Uses specialized parsers based on document type.
         
         Args:
             documents: List of document dictionaries
@@ -122,18 +153,18 @@ class DocumentProcessor:
         for doc in documents:
             content = doc['content']
             metadata = doc['metadata']
+            doc_type = metadata.get('doc_type', 'generic')
             
-            chunks = self._split_text(content)
+            # Select appropriate parser
+            if self.enable_specialized_parsing and doc_type in self.parser_registry:
+                parser = self.parser_registry[doc_type]
+                chunks = parser.parse(content, metadata)
+            else:
+                # Fallback to generic parser
+                parser = self.parser_registry['generic']
+                chunks = parser.parse(content, metadata)
             
-            for i, chunk_text in enumerate(chunks):
-                all_chunks.append({
-                    'text': chunk_text,
-                    'metadata': {
-                        **metadata,
-                        'chunk_id': i,
-                        'total_chunks': len(chunks)
-                    }
-                })
+            all_chunks.extend(chunks)
         
         print(f"📦 Created {len(all_chunks)} chunks from {len(documents)} documents")
         return all_chunks
