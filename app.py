@@ -572,7 +572,10 @@ with tab2:
                                         )
                             
                     except Exception as e:
+                        import traceback
                         st.error(f"Error: {e}")
+                        with st.expander("🐛 Debug Info"):
+                            st.code(traceback.format_exc())
 
 # ============================================================================
 # TAB 3: SETTINGS
@@ -628,12 +631,23 @@ with tab3:
     # LLM Provider Selection
     st.subheader("🤖 LLM Provider (for Answering)")
     
+    # Determine default index based on current provider
+    current_provider = st.session_state.llm_manager.provider
+    provider_map = {
+        "openai": 0,
+        "groq": 1,
+        "ollama_gpu": 2,
+        "ollama_cpu": 3
+    }
+    default_index = provider_map.get(current_provider, 1)  # Default to Groq
+    
     col1, col2 = st.columns([1, 2])
     
     with col1:
         provider = st.radio(
             "Choose LLM Provider:",
             ["☁️ OpenAI API", "⚡ Groq API (FREE)", "🚀 Ollama (GPU)", "💻 Ollama (CPU)"],
+            index=default_index,
             help="OpenAI requires paid API key. Groq is FREE & fast. Ollama runs locally."
         )
         

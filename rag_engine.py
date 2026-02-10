@@ -87,7 +87,8 @@ class RAGEngine:
         # LLM manager (handles OpenAI, Groq, Ollama)
         from llm_manager import LLMManager
         self.llm_manager = LLMManager()
-        self.chat_model = chat_model or Config.CHAT_MODEL
+        # Use the actual model from LLMManager, not config default
+        self.chat_model = self.llm_manager.model if self.llm_manager.model else (chat_model or Config.CHAT_MODEL)
         
         # Conversation components (Phase 3)
         self.conversation_manager = None
@@ -363,7 +364,9 @@ class RAGEngine:
         context = self._build_context(results)
         
         # Step 4: Generate answer using LLM
-        print(f"\nStep 3: Generating answer with {self.chat_model}...")
+        provider_name = self.llm_manager.provider or 'LLM'
+        model_name = self.llm_manager.model or self.chat_model
+        print(f"\nStep 3: Generating answer with {provider_name.upper()} ({model_name})...")
         if persona_profile:
             print(f"  Using persona: {persona_profile.name}")
             answer = self._generate_answer(
