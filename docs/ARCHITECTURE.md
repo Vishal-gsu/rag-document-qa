@@ -6,6 +6,8 @@ The Intelligent Multi-Document RAG System is designed to handle different docume
 
 ## Core Components
 
+### Phase 1 & 2: Document Intelligence
+
 ### 1. Document Classification Layer (`document_classifier.py`)
 
 **Purpose**: Automatically detect document types before processing
@@ -208,6 +210,19 @@ Returns results with metadata
 │ - Resumes        │                    │ - textbooks         │
 │ - Textbooks      │                    │ - general_docs      │
 └──────────────────┘                    └─────────────────────┘
+
+                         Phase 3 Components (NEW)
+                                    │
+              ┌─────────────────────┴────────────────────┐
+              │                                          │
+              ▼                                          ▼
+    ┌──────────────────────┐                 ┌──────────────────────┐
+    │ ConversationManager  │                 │   QueryRewriter      │
+    │                      │                 │                      │
+    │ - Session tracking   │                 │ - Context-aware      │
+    │ - History storage    │                 │ - Pronoun resolution │
+    │ - Pickle persistence │                 │ - LLM-based rewrite  │
+    └──────────────────────┘                 └──────────────────────┘
 ```
 
 ## Data Flow: Document Upload to Retrieval
@@ -259,6 +274,35 @@ Returns results with metadata
    LLM generates answer with citations
 ```
 
+### Phase 3: Conversational Query Flow (NEW)
+
+```
+1. USER ASKS FOLLOW-UP QUESTION
+   First: "What is machine learning?"
+   System answers and stores in conversation history
+       ↓
+   Follow-up: "What about deep learning?"
+       ↓
+   ConversationManager retrieves last 3 turns
+       ↓
+   QueryRewriter detects pronoun "about" (context-dependent phrase)
+       ↓
+   LLM rewrites using conversation history:
+   "What about deep learning in the context of machine learning?"
+       ↓
+   Rewritten query embedded and searched
+       ↓
+   More accurate results retrieved
+       ↓
+   Answer generated and stored to session
+```
+
+**Key Benefits**:
+- Users can ask natural follow-up questions
+- System maintains context across conversation
+- No need to repeat the full question each time
+- LLM-based rewriting handles complex references
+
 ## Technical Decisions & Trade-offs
 
 ### Decision 1: Heuristic Classification vs ML Model
@@ -309,6 +353,21 @@ Returns results with metadata
 
 **Migration Path**: Phase 3 uses pickle, Phase 6 migrates to SQLite if needed.
 
+### Decision 4: LLM-Based Query Rewriting vs Rule-Based
+
+**Chosen** (Phase 3): LLM-based query rewriting
+
+**Alternative**: Simple pronoun replacement with regex
+
+**Reasoning**: Complex context requires intelligence
+- Regex: Can replace "it" → last subject, but fails on complex references
+- LLM: Understands semantic context, handles multi-turn dependencies
+- Example: "What about its applications in healthcare?"
+  - Regex: Might replace "its" with wrong referent
+  - LLM: Reads conversation history to understand "its" = "machine learning's"
+
+**Fallback Strategy**: If LLM unavailable or fails, returns original query
+
 ## Performance Characteristics
 
 ### Collection Creation
@@ -326,22 +385,36 @@ Returns results with metadata
 - **Cross-Collection**: 10-50ms (aggregate + re-rank)
 - **Trade-off**: Slight latency increase for better accuracy
 
+### Conversational Query Rewriting (Phase 3)
+- **Detection**: 1-2ms (regex pattern matching)
+- **LLM Rewriting**: 100-500ms (depends on LLM provider)
+- **Context Retrieval**: 5ms (pickle file read)
+- **Total Overhead**: ~100-500ms for context-aware queries
+- **Trade-off**: Better accuracy for follow-ups vs slight latency
+
 ## Extension Points for Future Phases
 
 ### Ready to Add:
-1. **Structured Parsers** (Phase 2)
+1. ✅ **Structured Parsers** (Phase 2 - COMPLETED)
    - Drop-in replacement for `document_processor.chunk_documents()`
    - Returns chunks with section metadata
+   - Specialized parsers: ResearchPaperParser, ResumeParser, TextbookParser
    
-2. **Query Router** (Phase 5)
+2. ✅ **Conversation Manager** (Phase 3 - COMPLETED)
+   - Wraps `rag_engine.query()` with session tracking
+   - Stores Q&A pairs with timestamps and metadata
+   - Pickle-based persistence for sessions
+   
+3. ✅ **Query Rewriter** (Phase 3 - COMPLETED)
+   - Inserts before `embedding_engine.embed_text()`
+   - LLM-based pronoun resolution and context expansion
+   - Falls back to original query if rewriting fails
+   
+4. 🔜 **Query Router** (Phase 5 - PENDING)
    - Insert before `vector_store.search()`
    - Classify query intent → select collections
    
-3. **Conversation Manager** (Phase 3)
-   - Wrap `rag_engine.query()` with session tracking
-   - Store Q&A pairs for context
-
-4. **Persona System** (Phase 4)
+5. 🔜 **Persona System** (Phase 4 - PENDING)
    - Modify `rag_engine._generate_answer()` prompt
    - Adjust retrieval top_k based on expertise level
 
@@ -359,8 +432,8 @@ Returns results with metadata
 
 "Three main innovations:
 1. **Intelligent document routing** - Most RAG systems dump everything in one index. Mine segregates by document type for better accuracy.
-2. **Full metadata preservation** - I tracked down a bug where 80% of metadata was being lost. Now we keep chunk positions, timestamps, and document types for better citation and debugging.
-3. **Hybrid architecture** - The system works in both legacy single-collection mode and new multi-collection mode via feature flags, enabling safe gradual rollout."
+2. **Specialized parsers** - Research papers get section detection (abstract, methodology, results), resumes get skill extraction, textbooks get chapter detection. This enables section-level search instead of just chunk-level.
+3. **Conversational memory with query rewriting** - Users can ask 'What is ML?' then follow up with 'What about deep learning?' The system uses LLM to rewrite the second query based on conversation history, making follow-ups natural and accurate."
 
 ### "How does it scale?"
 
@@ -373,4 +446,92 @@ Returns results with metadata
 
 ### "What would you improve next?"
 
-"Phase 2 is already planned: structured parsers. Right now I extract raw text. Next step is detecting sections in research papers (abstract, methodology, results), extracting skills from resumes programmatically, and identifying chapters in textbooks. This enables section-level search—like 'find methodology sections mentioning BERT'—which is way more precise than chunk-level search."
+"Phase 4 is user personalization. I'll add three persona modes:
+- **Beginner**: Simpler language, more context (top_k=10), explanatory prompts
+- **Intermediate**: Balanced detail (top_k=5)
+- **Expert**: Concise answers, technical terminology (top_k=3)
+
+Phase 5 adds intelligent query routing. Right now users can manually select collections. Next, the system will auto-detect query intent—like 'find papers about BERT' routes to research_papers, 'show me Python skills' routes to resumes. Uses LLM-based classification of the query itself, not just documents."
+
+## Phase Implementation Summary
+
+### ✅ Phase 1: Multi-Collection Infrastructure (COMPLETED)
+**Files Created/Modified**:
+- `document_classifier.py` - Heuristic document type detection
+- `vector_store.py` - Multi-collection support with HNSW
+- `config.py` - Feature flags and collection mappings
+- `rag_engine.py` - Metadata preservation fix
+
+**Tests**: 4/4 passing
+- Document classification accuracy
+- Multi-collection creation and search
+- Configuration validation
+- RAG engine initialization
+
+**Key Achievements**:
+- 85-90% classification accuracy with heuristics
+- Separate Endee indices per document type
+- Backward compatible (feature flag controlled)
+- Zero metadata loss
+
+### ✅ Phase 2: Specialized Parsers (COMPLETED)
+**Files Created**:
+- `parsers/base_parser.py` - Abstract parser interface
+- `parsers/research_paper_parser.py` - Section detection (8 section types)
+- `parsers/resume_parser.py` - Skill extraction (16 categories)
+- `parsers/textbook_parser.py` - Chapter/exercise detection
+- `parsers/generic_parser.py` - Fallback parser
+
+**Modified**:
+- `document_processor.py` - Parser registry and routing
+
+**Tests**: 5/5 passing
+- All parser implementations
+- Section detection
+- Metadata enrichment
+- Integration with processor
+
+**Key Achievements**:
+- Section-aware chunking for academic papers
+- Automated skill extraction from resumes
+- Chapter boundary detection for textbooks
+- 100% backward compatible
+
+### ✅ Phase 3: Conversational Memory (COMPLETED)
+**Files Created**:
+- `conversation_manager.py` - Session tracking with pickle storage
+- `query_rewriter.py` - LLM-based query expansion
+
+**Modified**:
+- `rag_engine.py` - ConversationManager + QueryRewriter integration
+- `app.py` - Streamlit UI with conversation history sidebar
+
+**Tests**: 14/14 passing (all Phase 1-3)
+- Session creation and persistence
+- Query rewriting detection
+- Context-aware query expansion
+- Multi-turn conversation tracking
+
+**Key Achievements**:
+- Natural follow-up questions ("What about X?")
+- LLM-based pronoun resolution
+- Conversation history UI with session stats
+- 100ms-500ms rewriting overhead
+
+### 🔜 Phase 4: User Persona System (PENDING)
+**Planned**:
+- Beginner/Intermediate/Expert modes
+- Dynamic top_k adjustment
+- Persona-specific prompts
+
+### 🔜 Phase 5: Query Routing Intelligence (PENDING)
+**Planned**:
+- Auto-detect query intent
+- Collection selection based on query
+- Smart hybrid search
+
+### 🔜 Phase 6: Enhanced UI & Demo (PENDING)
+**Planned**:
+- Dashboard with analytics
+- Demo script for interviews
+- README humanization

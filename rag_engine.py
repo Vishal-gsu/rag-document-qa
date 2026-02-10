@@ -2,6 +2,7 @@
 RAG Engine Module
 Orchestrates the complete RAG pipeline: retrieval + generation.
 Supports multi-collection architecture for document type segregation.
+Includes conversational memory and query rewriting.
 """
 from typing import List, Dict, Optional
 from openai import OpenAI
@@ -11,6 +12,8 @@ from document_processor import DocumentProcessor
 from embedding_engine import EmbeddingEngine
 from vector_store import VectorStore
 from document_classifier import DocumentClassifier
+from conversation_manager import ConversationManager
+from query_rewriter import QueryRewriter
 
 
 class RAGEngine:
@@ -23,7 +26,8 @@ class RAGEngine:
                  db_path: str = None,
                  collection_name: str = None,
                  chat_model: str = None,
-                 enable_multi_collection: bool = None):
+                 enable_multi_collection: bool = None,
+                 enable_conversation: bool = True):
         """
         Initialize RAG engine.
         
@@ -32,6 +36,7 @@ class RAGEngine:
             collection_name: Name of the default collection
             chat_model: OpenAI chat model to use
             enable_multi_collection: Enable multi-collection mode
+            enable_conversation: Enable conversational memory
         """
         # Validate configuration
         Config.validate()
@@ -41,6 +46,7 @@ class RAGEngine:
             enable_multi_collection = Config.ENABLE_MULTI_COLLECTION
         
         self.enable_multi_collection = enable_multi_collection
+        self.enable_conversation = enable_conversation
         
         # Initialize components
         self.embedding_engine = EmbeddingEngine()
@@ -70,6 +76,16 @@ class RAGEngine:
         # LLM client
         self.chat_model = chat_model or Config.CHAT_MODEL
         self.openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
+        
+        # Conversation components (Phase 3)
+        self.conversation_manager = None
+        self.query_rewriter = None
+        if enable_conversation:
+            from llm_manager import LLMManager
+            llm_manager = LLMManager()
+            self.conversation_manager = ConversationManager()
+            self.query_rewriter = QueryRewriter(llm_manager=llm_manager)
+            print("✓ Conversational memory enabled")
         
         print("✓ RAG Engine initialized")
     
@@ -201,7 +217,9 @@ class RAGEngine:
               question: str, 
               top_k: int = None,
               return_context: bool = False,
-              similarity_threshold: float = 0.0) -> str:
+              similarity_threshold: float = 0.0,
+              session_id: str = None,
+              enable_rewrite: bool = True) -> str:
         """
         Query the RAG system with a question.
         
@@ -210,6 +228,8 @@ class RAGEngine:
             top_k: Number of context chunks to retrieve
             return_context: Whether to return retrieved context
             similarity_threshold: Minimum similarity score (0.0 to 1.0) for results
+            session_id: Conversation session ID for context tracking
+            enable_rewrite: Enable query rewriting based on conversation history
             
         Returns:
             Generated answer (and context if return_context=True)
@@ -218,12 +238,28 @@ class RAGEngine:
             return "Please provide a valid question."
         
         top_k = top_k or Config.TOP_K_RESULTS
+        original_question = question
         
         print(f"\n{'='*60}")
         print(f"🤔 Question: {question}")
         print(f"{'='*60}\n")
         
-        # Step 1: Embed the question
+        # Step 0: Query rewriting (if conversation enabled)
+        if self.enable_conversation and session_id and self.query_rewriter and enable_rewrite:
+            history = self.conversation_manager.get_history(session_id, last_n=3)
+            if history:
+                print("Step 0: Rewriting query with conversation context...")
+                question = self.query_rewriter.rewrite_with_context(
+                    current_query=question,
+                    conversation_history=history,
+                    enable_rewrite=enable_rewrite
+                )
+                if question != original_question:
+                    print(f"  Original: {original_question}")
+                    print(f"  Rewritten: {question}")
+                print()
+        
+        # Step 1: Embed the question (using rewritten query if applicable)
         print("Step 1: Embedding question...")
         question_embedding = self.embedding_engine.embed_text(question)
         
@@ -260,6 +296,21 @@ class RAGEngine:
         print(f"{'='*60}")
         print(answer)
         print(f"{'='*60}\n")
+        
+        # Step 5: Save conversation turn (if conversation enabled)
+        if self.enable_conversation and session_id and self.conversation_manager:
+            self.conversation_manager.add_turn(
+                session_id=session_id,
+                question=original_question,  # Store original question, not rewritten
+                answer=answer,
+                retrieved_context=[{'text': r['text'][:200], 'source': r['metadata'].get('filename')} for r in results],
+                metadata={
+                    'rewritten_query': question if question != original_question else None,
+                    'top_k': top_k,
+                    'model': self.chat_model,
+                    'num_results': len(results)
+                }
+            )
         
         if return_context:
             return {

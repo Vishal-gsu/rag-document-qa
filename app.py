@@ -9,6 +9,7 @@ from pathlib import Path
 import tempfile
 from typing import List
 import json
+import uuid
 
 # Import RAG components
 from rag_engine import RAGEngine
@@ -26,6 +27,9 @@ st.set_page_config(
 # Initialize session state
 if "conversation_history" not in st.session_state:
     st.session_state.conversation_history = []
+
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
 if "rag_engine" not in st.session_state:
     st.session_state.rag_engine = None
@@ -53,6 +57,9 @@ if "max_tokens" not in st.session_state:
 
 if "similarity_threshold" not in st.session_state:
     st.session_state.similarity_threshold = 0.4
+
+if "enable_conversation" not in st.session_state:
+    st.session_state.enable_conversation = True
 
 
 def initialize_rag():
@@ -198,135 +205,128 @@ with tab2:
             st.warning("⚠️ No documents indexed yet. Please upload documents in the Upload tab.")
         else:
             # Chat interface
-            st.markdown("Ask questions about your documents. The system remembers conversation history!")
+            st.markdown("Ask questions about your documents. The system remembers conversation history and can answer follow-up questions!")
             
-            # Display conversation history
-            if st.session_state.conversation_history:
-                st.markdown("### 💭 Conversation History")
-                for msg in st.session_state.conversation_history:
-                    if msg["role"] == "user":
-                        st.markdown(f"**You:** {msg['content']}")
-                    else:
-                        st.markdown(f"**Assistant:** {msg['content']}")
-                        st.markdown("---")
+            # Sidebar: Conversation controls
+            with st.sidebar:
+                st.markdown("### 💭 Conversation")
+                
+                # Show current session info
+                if st.session_state.rag_engine and hasattr(st.session_state.rag_engine, 'conversation_manager'):
+                    if st.session_state.rag_engine.conversation_manager:
+                        stats = st.session_state.rag_engine.conversation_manager.get_session_stats(st.session_state.session_id)
+                        if stats:
+                            st.metric("Turns", stats.get('turn_count', 0))
+                
+                # New conversation button
+                if st.button("🔄 New Conversation", help="Start a fresh conversation"):
+                    st.session_state.session_id = str(uuid.uuid4())
+                    st.session_state.conversation_history = []
+                    st.success("Started new conversation!")
+                    st.rerun()
+                
+                # Enable/disable conversation
+                st.session_state.enable_conversation = st.checkbox(
+                    "Enable Conversational Memory",
+                    value=st.session_state.enable_conversation,
+                    help="When enabled, the system remembers context from previous questions"
+                )
+            
+            # Display conversation history from ConversationManager
+            if st.session_state.rag_engine and hasattr(st.session_state.rag_engine, 'conversation_manager'):
+                if st.session_state.rag_engine.conversation_manager:
+                    history = st.session_state.rag_engine.conversation_manager.get_history(st.session_state.session_id)
+                    
+                    if history:
+                        st.markdown("### 💭 Conversation History")
+                        for turn in history:
+                            st.markdown(f"**You:** {turn['question']}")
+                            st.markdown(f"**Assistant:** {turn['answer'][:300]}...")
+                            
+                            # Show if query was rewritten
+                            if turn.get('metadata', {}).get('rewritten_query'):
+                                with st.expander("🔄 Query was rewritten"):
+                                    st.text(f"Original: {turn['question']}")
+                                    st.text(f"Rewritten: {turn['metadata']['rewritten_query']}")
+                            
+                            st.markdown("---")
             
             # Query input
             question = st.text_input(
                 "Your question:",
-                placeholder="e.g., What is machine learning?",
+                placeholder="e.g., What is machine learning? Then try: What about deep learning?",
                 key="query_input"
             )
             
             col1, col2, col3 = st.columns([2, 2, 6])
             
             with col1:
-                ask_button = st.button("🔍 Ask", type="primary", width='stretch')
+                ask_button = st.button("🔍 Ask", type="primary", use_container_width=True)
             
             with col2:
-                if st.button("🗑️ Clear History", width='stretch'):
+                if st.button("🗑️ Clear History", use_container_width=True):
+                    st.session_state.session_id = str(uuid.uuid4())
                     st.session_state.conversation_history = []
                     st.rerun()
             
             if ask_button and question:
                 with st.spinner("Thinking..."):
                     try:
-                        # Build messages with conversation history and system prompt
-                        messages = [{"role": "system", "content": st.session_state.system_prompt}]
-                        messages.extend(st.session_state.conversation_history[-10:])  # Last 5 turns
-                        
-                        # Get embedding and retrieve context
-                        question_embedding = st.session_state.rag_engine.embedding_engine.embed_text(question)
-                        results = st.session_state.rag_engine.vector_store.search(
-                            query_vector=question_embedding,
-                            top_k=st.session_state.top_k_results
+                        # Use RAG engine's query method with conversational support
+                        result = st.session_state.rag_engine.query(
+                            question=question,
+                            top_k=st.session_state.top_k_results,
+                            return_context=True,
+                            similarity_threshold=st.session_state.similarity_threshold,
+                            session_id=st.session_state.session_id if st.session_state.enable_conversation else None,
+                            enable_rewrite=st.session_state.enable_conversation
                         )
                         
-                        if not results:
+                        answer = result['answer']
+                        filtered_results = result['context']
+                        
+                        if not filtered_results:
                             st.error("No relevant information found.")
                         else:
-                            # Filter by similarity threshold
-                            filtered_results = [r for r in results if r['score'] >= st.session_state.similarity_threshold]
+                            # Display answer
+                            st.markdown("### 💡 Answer")
+                            st.markdown(answer)
                             
-                            # Debug: Show all scores
-                            scores_str = [f"{r['score']:.2f}" for r in results[:5]]
-                            st.info(f"🔍 Debug: Retrieved {len(results)} results. Top 5 scores: {scores_str}")
+                            # Display sources
+                            st.markdown(f"### 📚 Sources (showing {len(filtered_results)} most relevant)")
+                            for i, result in enumerate(filtered_results):
+                                sim_score = result['score']
+                                # Color code by similarity
+                                if sim_score >= 0.7:
+                                    emoji = "🟢"
+                                elif sim_score >= 0.5:
+                                    emoji = "🟡"
+                                else:
+                                    emoji = "🟠"
+                                
+                                with st.expander(f"{emoji} Source {i+1}: {result['metadata'].get('filename', 'Unknown')} (Similarity: {sim_score:.1%})"):
+                                    st.text(result['text'])
                             
-                            if not filtered_results:
-                                st.warning(f"⚠️ No results above {st.session_state.similarity_threshold:.0%} similarity. Try rephrasing your question.")
-                                st.info("💡 Tip: Be more specific. Instead of 'this resume', try 'Vishal Kumar's experience' or 'What are the skills?'")
-                            else:
-                                # Build context from filtered results only
-                                context_parts = []
-                                for i, result in enumerate(filtered_results):
-                                    source = result['metadata'].get('filename', 'Unknown')
-                                    text = result['text']
-                                    context_parts.append(f"[Source {i+1}: {source}]\n{text}")
-                                context = "\n\n".join(context_parts)
-                            
-                                # Add user message with improved prompt structure
-                                user_message = f"""Context from documents:
-{context}
-
-Question: {question}
-
-Provide a comprehensive answer using the information above. Include relevant details and explanations. Do not add follow-up questions."""
-                                messages.append({"role": "user", "content": user_message})
-                            
-                                # Generate answer using LLM manager
-                                answer = st.session_state.llm_manager.generate(
-                                messages=messages,
-                                temperature=st.session_state.temperature,
-                                max_tokens=st.session_state.max_tokens
+                            # Export option
+                            export_data = {
+                                "question": question,
+                                "answer": answer,
+                                "session_id": st.session_state.session_id,
+                                "sources": [
+                                    {
+                                        "file": r['metadata'].get('filename', 'Unknown'),
+                                        "similarity": r['score'],
+                                        "text": r['text']
+                                    }
+                                    for r in filtered_results
+                                ]
+                            }
+                            st.download_button(
+                                "📥 Download Result (JSON)",
+                                data=json.dumps(export_data, indent=2),
+                                file_name=f"rag_result_{st.session_state.session_id[:8]}.json",
+                                mime="application/json"
                             )
-                            
-                                # Update conversation history
-                                st.session_state.conversation_history.append({
-                                    "role": "user",
-                                    "content": question
-                                })
-                                st.session_state.conversation_history.append({
-                                    "role": "assistant",
-                                    "content": answer
-                                })
-                            
-                                # Display answer
-                                st.markdown("### 💡 Answer")
-                                st.markdown(answer)
-                            
-                                # Display sources (filtered only)
-                                st.markdown(f"### 📚 Sources (showing {len(filtered_results)} most relevant)")
-                                for i, result in enumerate(filtered_results):
-                                    sim_score = result['score']
-                                    # Color code by similarity
-                                    if sim_score >= 0.7:
-                                        emoji = "🟢"
-                                    elif sim_score >= 0.5:
-                                        emoji = "🟡"
-                                    else:
-                                        emoji = "🟠"
-                                    
-                                    with st.expander(f"{emoji} Source {i+1}: {result['metadata'].get('filename', 'Unknown')} (Similarity: {sim_score:.1%})"):
-                                        st.text(result['text'])
-                            
-                                # Export option
-                                export_data = {
-                                    "question": question,
-                                    "answer": answer,
-                                    "sources": [
-                                        {
-                                            "file": r['metadata'].get('filename', 'Unknown'),
-                                            "similarity": r['score'],
-                                            "text": r['text']
-                                        }
-                                        for r in filtered_results
-                                    ]
-                                }
-                                st.download_button(
-                                    "📥 Download Result (JSON)",
-                                    data=json.dumps(export_data, indent=2),
-                                    file_name=f"rag_result_{len(st.session_state.conversation_history)}.json",
-                                    mime="application/json"
-                                )
                             
                     except Exception as e:
                         st.error(f"Error: {e}")
