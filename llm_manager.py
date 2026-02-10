@@ -16,11 +16,15 @@ class LLMManager:
     """Manages different LLM providers."""
     
     def __init__(self):
-        self.provider = "openai"
+        self.provider = None
         self.openai_client = None
         self.groq_client = None
+        self.model = None
         self.available_models = {}  # Initialize before checking Ollama
         self.ollama_available = self._check_ollama()
+        
+        # Auto-detect and initialize provider based on available API keys
+        self._auto_initialize()
         
     def _check_ollama(self) -> bool:
         """Check if Ollama is installed and running."""
@@ -34,6 +38,42 @@ class LLMManager:
         except Exception as e:
             print(f"Ollama check failed: {e}")
         return False
+    
+    def _auto_initialize(self):
+        """Auto-detect and initialize the best available LLM provider."""
+        # Priority: Groq (free & fast) > OpenAI > Ollama
+        
+        # Try Groq first (free and fast!)
+        groq_key = os.getenv("GROQ_API_KEY")
+        if groq_key:
+            try:
+                self.set_provider("groq", api_key=groq_key)
+                print("✓ Using Groq API (FREE & Fast)")
+                return
+            except Exception as e:
+                print(f"Groq initialization failed: {e}")
+        
+        # Try OpenAI
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if openai_key:
+            try:
+                self.set_provider("openai", api_key=openai_key)
+                print("✓ Using OpenAI API")
+                return
+            except Exception as e:
+                print(f"OpenAI initialization failed: {e}")
+        
+        # Try Ollama (local)
+        if self.ollama_available:
+            try:
+                self.set_provider("ollama_gpu")
+                print("✓ Using Ollama (Local)")
+                return
+            except Exception as e:
+                print(f"Ollama initialization failed: {e}")
+        
+        # No provider available
+        print("⚠️ No LLM provider available. Please set GROQ_API_KEY or OPENAI_API_KEY in .env")
     
     def set_provider(self, provider: str, **kwargs):
         """
