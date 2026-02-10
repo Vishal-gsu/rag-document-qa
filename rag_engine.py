@@ -106,11 +106,9 @@ class RAGEngine:
         # Query routing system (Phase 5)
         self.query_router = None
         if enable_query_routing and enable_multi_collection:
-            from llm_manager import LLMManager
-            llm_manager = llm_manager if enable_conversation else LLMManager()
             self.query_router = QueryRouter(
                 use_llm=use_llm_routing,
-                llm_manager=llm_manager if use_llm_routing else None
+                llm_manager=self.llm_manager if use_llm_routing else None
             )
             print(f"✓ Query routing enabled ({'LLM-based' if use_llm_routing else 'heuristic'})")
         
