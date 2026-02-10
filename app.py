@@ -327,7 +327,7 @@ with tab2:
                             rewritten_count = sum(1 for h in history if h.get('metadata', {}).get('rewritten_query'))
                             st.metric("Rewrites", rewritten_count)
                         with col3:
-                            avg_sources = sum(len(h.get('metadata', {}).get('sources', [])) for h in history) / max(len(history), 1)
+                            avg_sources = sum(len(h.get('retrieved_context', [])) for h in history) / max(len(history), 1)
                             st.metric("Avg Sources", f"{avg_sources:.1f}")
                         
                         st.markdown("---")
@@ -433,11 +433,15 @@ with tab2:
                             with perf_col2:
                                 st.metric("📄 Sources", len(filtered_results))
                             with perf_col3:
-                                avg_score = sum(r['score'] for r in filtered_results) / len(filtered_results)
+                                scores = [r.get('score', 0.0) for r in filtered_results if isinstance(r, dict) and 'score' in r]
+                                avg_score = sum(scores) / len(scores) if scores else 0.0
                                 st.metric("🎯 Avg Score", f"{avg_score:.0%}")
                             with perf_col4:
                                 used_persona = result.get('metadata', {}).get('persona', st.session_state.current_persona)
-                                st.metric("👤 Persona", used_persona.title())
+                                if used_persona:
+                                    st.metric("👤 Persona", used_persona.title())
+                                else:
+                                    st.metric("👤 Persona", "Default")
                             
                             # Routing Explanation (Phase 6)
                             if st.session_state.enable_auto_routing and result.get('metadata', {}).get('routing_explanation'):
@@ -472,7 +476,11 @@ with tab2:
                             # Display sources
                             st.markdown(f"### 📚 Sources (showing {len(filtered_results)} most relevant)")
                             for i, result_item in enumerate(filtered_results):
-                                sim_score = result_item['score']
+                                # Ensure result_item has required fields
+                                if not isinstance(result_item, dict) or 'score' not in result_item:
+                                    continue
+                                    
+                                sim_score = result_item.get('score', 0.0)
                                 # Color code by similarity
                                 if sim_score >= 0.7:
                                     emoji = "🟢"
@@ -483,25 +491,26 @@ with tab2:
                                 
                                 # Add collection tag if multi-collection
                                 collection_tag = ""
-                                if result_item['metadata'].get('collection'):
+                                metadata = result_item.get('metadata', {})
+                                if isinstance(metadata, dict) and metadata.get('collection'):
                                     coll_icons = {
                                         'research_papers': '📄',
                                         'resumes': '👤',
                                         'textbooks': '📚',
                                         'general_docs': '📁'
                                     }
-                                    coll_name = result_item['metadata']['collection']
+                                    coll_name = metadata['collection']
                                     collection_tag = f" {coll_icons.get(coll_name, '📄')} [{coll_name}]"
                                 
-                                with st.expander(f"{emoji} Source {i+1}: {result_item['metadata'].get('filename', 'Unknown')}{collection_tag} (Similarity: {sim_score:.1%})"):
-                                    st.text(result_item['text'])
+                                with st.expander(f"{emoji} Source {i+1}: {metadata.get('filename', 'Unknown')}{collection_tag} (Similarity: {sim_score:.1%})"):
+                                    st.text(result_item.get('text', 'No text available'))
                                     
                                     # Show additional metadata
                                     meta_info = []
-                                    if result_item['metadata'].get('chunk_index') is not None:
-                                        meta_info.append(f"Chunk #{result_item['metadata']['chunk_index'] + 1}")
-                                    if result_item['metadata'].get('doc_type'):
-                                        meta_info.append(f"Type: {result_item['metadata']['doc_type']}")
+                                    if metadata.get('chunk_index') is not None:
+                                        meta_info.append(f"Chunk #{metadata['chunk_index'] + 1}")
+                                    if metadata.get('doc_type'):
+                                        meta_info.append(f"Type: {metadata['doc_type']}")
                                     if meta_info:
                                         st.caption(" | ".join(meta_info))
                             
@@ -520,13 +529,14 @@ with tab2:
                                 },
                                 "sources": [
                                     {
-                                        "file": r['metadata'].get('filename', 'Unknown'),
-                                        "collection": r['metadata'].get('collection'),
-                                        "similarity": r['score'],
-                                        "text": r['text'],
-                                        "chunk_index": r['metadata'].get('chunk_index')
+                                        "file": r.get('metadata', {}).get('filename', 'Unknown') if isinstance(r.get('metadata'), dict) else 'Unknown',
+                                        "collection": r.get('metadata', {}).get('collection') if isinstance(r.get('metadata'), dict) else None,
+                                        "similarity": r.get('score', 0.0),
+                                        "text": r.get('text', ''),
+                                        "chunk_index": r.get('metadata', {}).get('chunk_index') if isinstance(r.get('metadata'), dict) else None
                                     }
                                     for r in filtered_results
+                                    if isinstance(r, dict)
                                 ],
                                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                             }
