@@ -286,6 +286,8 @@ class RAGEngine:
         
         # Determine which collections to search (Phase 5)
         search_collections = collections  # Use explicit collections if provided
+        routing_confidence = None
+        routing_explanation = None
         
         if search_collections is None and self.enable_query_routing and self.query_router:
             # Auto-route based on query intent
@@ -293,6 +295,13 @@ class RAGEngine:
                 available = list(self.vector_store.collections.keys()) if self.enable_multi_collection else None
                 search_collections = self.query_router.route_query(question, available)
                 print(f"  Routing: {', '.join(search_collections)}")
+                
+                # Get routing confidence scores
+                all_scores = self.query_router.get_intent_confidence(question)
+                if all_scores and search_collections:
+                    # Calculate confidence as average of selected collections
+                    routing_confidence = sum(all_scores.get(c, 0) for c in search_collections) / len(search_collections)
+                    routing_explanation = f"Query routed to {len(search_collections)} collection(s) based on keyword/phrase matching"
         
         original_question = question
         
@@ -373,6 +382,19 @@ class RAGEngine:
         print(answer)
         print(f"{'='*60}\n")
         
+        # Build metadata for return
+        result_metadata = {
+            'rewritten_query': question if question != original_question else None,
+            'top_k': top_k,
+            'model': self.chat_model,
+            'num_results': len(results),
+            'persona': persona_profile.name if persona_profile else None,
+            'collections_searched': search_collections if search_collections else None,
+            'routing_enabled': self.enable_query_routing and auto_route,
+            'routing_confidence': routing_confidence,
+            'routing_explanation': routing_explanation
+        }
+        
         # Step 5: Save conversation turn (if conversation enabled)
         if self.enable_conversation and session_id and self.conversation_manager:
             self.conversation_manager.add_turn(
@@ -380,19 +402,14 @@ class RAGEngine:
                 question=original_question,  # Store original question, not rewritten
                 answer=answer,
                 retrieved_context=[{'text': r['text'][:200], 'source': r['metadata'].get('filename')} for r in results],
-                metadata={
-                    'rewritten_query': question if question != original_question else None,
-                    'top_k': top_k,
-                    'model': self.chat_model,
-                    'num_results': len(results),
-                    'persona': persona_profile.name if persona_profile else None
-                }
+                metadata=result_metadata
             )
         
         if return_context:
             return {
                 'answer': answer,
-                'context': results
+                'context': results,
+                'metadata': result_metadata
             }
         
         return answer
