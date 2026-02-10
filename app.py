@@ -67,6 +67,12 @@ if "current_persona" not in st.session_state:
 if "adapt_persona_to_query" not in st.session_state:
     st.session_state.adapt_persona_to_query = False
 
+if "selected_collections" not in st.session_state:
+    st.session_state.selected_collections = None  # None = auto-route
+
+if "enable_auto_routing" not in st.session_state:
+    st.session_state.enable_auto_routing = True
+
 
 def initialize_rag():
     """Initialize RAG engine if not already done."""
@@ -277,6 +283,41 @@ with tab2:
                             st.text(f"Temperature: {profile.temperature}")
                             st.text(f"Max Tokens: {profile.max_tokens}")
                             st.text(f"Strategy: {profile.retrieval_strategy}")
+                
+                st.markdown("---")
+                st.markdown("### 🗂️ Collection Routing")
+                
+                # Auto-routing toggle
+                st.session_state.enable_auto_routing = st.checkbox(
+                    "Enable Smart Routing",
+                    value=st.session_state.enable_auto_routing,
+                    help="Automatically route queries to relevant document types"
+                )
+                
+                # Collection selector (manual override)
+                if st.session_state.rag_engine and st.session_state.rag_engine.enable_multi_collection:
+                    available_collections = list(st.session_state.rag_engine.vector_store.collections.keys())
+                    
+                    if not st.session_state.enable_auto_routing:
+                        collection_options = {
+                            'research_papers': '📄 Research Papers',
+                            'resumes': '👤 Resumes/CVs',
+                            'textbooks': '📚 Textbooks',
+                            'general_docs': '📁 General Documents'
+                        }
+                        
+                        selected = st.multiselect(
+                            "Select collections to search:",
+                            options=[c for c in collection_options.keys() if c in available_collections],
+                            default=None,
+                            format_func=lambda x: collection_options.get(x, x),
+                            help="Choose which document types to search"
+                        )
+                        
+                        st.session_state.selected_collections = selected if selected else None
+                    else:
+                        st.session_state.selected_collections = None
+                        st.info("🤖 Auto-routing enabled - collections selected based on query intent")
             
             # Display conversation history from ConversationManager
             if st.session_state.rag_engine and hasattr(st.session_state.rag_engine, 'conversation_manager'):
@@ -318,7 +359,7 @@ with tab2:
             if ask_button and question:
                 with st.spinner("Thinking..."):
                     try:
-                        # Use RAG engine's query method with conversational and persona support
+                        # Use RAG engine's query method with all features
                         result = st.session_state.rag_engine.query(
                             question=question,
                             top_k=None,  # Let persona decide unless overridden
@@ -327,7 +368,9 @@ with tab2:
                             session_id=st.session_state.session_id if st.session_state.enable_conversation else None,
                             enable_rewrite=st.session_state.enable_conversation,
                             persona=st.session_state.current_persona,
-                            adapt_to_query=st.session_state.adapt_persona_to_query
+                            adapt_to_query=st.session_state.adapt_persona_to_query,
+                            collections=st.session_state.selected_collections,
+                            auto_route=st.session_state.enable_auto_routing
                         )
                         
                         answer = result['answer']

@@ -2,7 +2,7 @@
 RAG Engine Module
 Orchestrates the complete RAG pipeline: retrieval + generation.
 Supports multi-collection architecture for document type segregation.
-Includes conversational memory, query rewriting, and user personas.
+Includes conversational memory, query rewriting, user personas, and query routing.
 """
 from typing import List, Dict, Optional
 from openai import OpenAI
@@ -15,6 +15,7 @@ from document_classifier import DocumentClassifier
 from conversation_manager import ConversationManager
 from query_rewriter import QueryRewriter
 from user_persona import UserPersona
+from query_router import QueryRouter
 
 
 class RAGEngine:
@@ -30,7 +31,9 @@ class RAGEngine:
                  enable_multi_collection: bool = None,
                  enable_conversation: bool = True,
                  enable_personas: bool = True,
-                 default_persona: str = 'intermediate'):
+                 default_persona: str = 'intermediate',
+                 enable_query_routing: bool = True,
+                 use_llm_routing: bool = False):
         """
         Initialize RAG engine.
         
@@ -42,6 +45,8 @@ class RAGEngine:
             enable_conversation: Enable conversational memory
             enable_personas: Enable user persona system
             default_persona: Default persona (beginner/intermediate/expert/researcher)
+            enable_query_routing: Enable intelligent query routing
+            use_llm_routing: Use LLM for query routing (more accurate but slower)
         """
         # Validate configuration
         Config.validate()
@@ -53,6 +58,7 @@ class RAGEngine:
         self.enable_multi_collection = enable_multi_collection
         self.enable_conversation = enable_conversation
         self.enable_personas = enable_personas
+        self.enable_query_routing = enable_query_routing and enable_multi_collection  # Only meaningful in multi-collection mode
         
         # Initialize components
         self.embedding_engine = EmbeddingEngine()
@@ -98,6 +104,17 @@ class RAGEngine:
         if enable_personas:
             self.persona_manager = UserPersona(default_persona=default_persona)
             print(f"✓ User persona system enabled (default: {default_persona})")
+        
+        # Query routing system (Phase 5)
+        self.query_router = None
+        if enable_query_routing and enable_multi_collection:
+            from llm_manager import LLMManager
+            llm_manager = llm_manager if enable_conversation else LLMManager()
+            self.query_router = QueryRouter(
+                use_llm=use_llm_routing,
+                llm_manager=llm_manager if use_llm_routing else None
+            )
+            print(f"✓ Query routing enabled ({'LLM-based' if use_llm_routing else 'heuristic'})")
         
         print("✓ RAG Engine initialized")
     
@@ -233,7 +250,9 @@ class RAGEngine:
               session_id: str = None,
               enable_rewrite: bool = True,
               persona: str = None,
-              adapt_to_query: bool = False) -> str:
+              adapt_to_query: bool = False,
+              collections: List[str] = None,
+              auto_route: bool = True) -> str:
         """
         Query the RAG system with a question.
         
@@ -246,6 +265,8 @@ class RAGEngine:
             enable_rewrite: Enable query rewriting based on conversation history
             persona: User persona (beginner/intermediate/expert/researcher)
             adapt_to_query: Dynamically adapt persona based on query complexity
+            collections: Specific collections to search (None = auto-route or all)
+            auto_route: Auto-route query to relevant collections (only if collections=None)
             
         Returns:
             Generated answer (and context if return_context=True)
@@ -266,6 +287,16 @@ class RAGEngine:
                 top_k = persona_profile.top_k
         else:
             top_k = top_k or Config.TOP_K_RESULTS
+        
+        # Determine which collections to search (Phase 5)
+        search_collections = collections  # Use explicit collections if provided
+        
+        if search_collections is None and self.enable_query_routing and self.query_router:
+            # Auto-route based on query intent
+            if auto_route:
+                available = list(self.vector_store.collections.keys()) if self.enable_multi_collection else None
+                search_collections = self.query_router.route_query(question, available)
+                print(f"  Routing: {', '.join(search_collections)}")
         
         original_question = question
         
@@ -294,10 +325,20 @@ class RAGEngine:
         
         # Step 2: Retrieve relevant chunks
         print(f"Step 2: Retrieving top-{top_k} relevant chunks...")
-        results = self.vector_store.search(
-            query_vector=question_embedding,
-            top_k=top_k
-        )
+        
+        # Use multi-collection search if collections specified and multi-collection enabled
+        if search_collections and self.enable_multi_collection:
+            results = self.vector_store.search_multi_collection(
+                query_vector=question_embedding,
+                collections=search_collections,
+                top_k=top_k
+            )
+        else:
+            # Default single-collection search
+            results = self.vector_store.search(
+                query_vector=question_embedding,
+                top_k=top_k
+            )
         
         # Filter by similarity threshold if specified
         if similarity_threshold > 0.0:

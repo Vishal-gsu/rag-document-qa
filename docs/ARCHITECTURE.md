@@ -745,9 +745,40 @@ Phase 6 is production polish: better UI with conversation branches, export optio
 - 🎯 Expert: top_k=7, temp=0.3, 400 tokens, technical depth
 - 🔬 Researcher: top_k=10, temp=0.2, 700 tokens, scholarly focus
 
-### 🔜 Phase 5: Query Routing Intelligence (PENDING)
+### ✅ Phase 5: Query Routing Intelligence (COMPLETED)
+**Files Created**:
+- `query_router.py` - Intent detection and collection routing
+
+**Modified**:
+- `rag_engine.py` - QueryRouter integration with auto-routing
+- `app.py` - Streamlit smart routing toggle + collection selector
+
+**Tests**: 39/39 passing (all Phase 1-5)
+- Heuristic intent detection for all document types
+- Confidence scoring for routing decisions
+- Collection limiting and filtering
+- RAG integration with routing parameters
+- Manual vs auto-routing modes
+
+**Key Achievements**:
+- Heuristic pattern matching (fast, explainable)
+- Optional LLM-based routing (more accurate)
+- Auto-routing vs manual collection selection
+- Confidence scores for routing transparency
+
+**Routing Patterns**:
+- 📄 Research Papers: 'papers', 'study', 'research', 'algorithm', 'experimental results'
+- 👤 Resumes: 'experience', 'skills', 'candidates', 'Python', 'AWS', 'Docker'
+- 📚 Textbooks: 'learn', 'tutorial', 'chapter', 'exercises', 'introduction to'
+- 📁 General: Fallback for unmatched or ambiguous queries
+
+**Routing Modes**:
+- 🤖 Auto-route: Query intent detection → relevant collections (default)
+- ✋ Manual: User explicitly selects collections to search
+- 🔀 Hybrid: Auto-route with max collection limits
+
+### 🔜 Phase 6: Enhanced UI & Interview Demo (PENDING)
 **Planned**:
-- Beginner/Intermediate/Expert modes
 - Dynamic top_k adjustment
 - Persona-specific prompts
 
