@@ -208,36 +208,54 @@ Query: "What Python experience do candidates have?"
 - Python 3.8+
 - Docker & Docker Compose (for Endee vector database)
 - 4GB RAM minimum
-- API key for LLM provider (Groq free tier recommended)
+- **API Key**: Choose ONE of these LLM providers:
+  - **Groq** (Recommended - FREE, 7000 requests/day) - Get key at https://console.groq.com/keys
+  - **OpenAI** (Paid) - Get key at https://platform.openai.com/api-keys
+  - **Ollama** (Local, no API key) - Install from https://ollama.ai/download
 
 ### Quick Start
 
 ```bash
-# 1. Clone repository and virtual environment
-git clone https://github.com/Vishal-gsu/rag-document-qa
+# 1. Clone repository
+git clone https://github.com/Vishal-gsu/rag-document-qa.git
 cd rag-document-qa
 
-### Create and Activate Virtual Environment
+# 2. Create virtual environment (recommended)
+python -m venv venv
 
-**Windows:**
-```bash
-python -m venv rag
-rag\Scripts\activate
+# Windows
+venv\Scripts\activate
 
-# 2. Install dependencies
+# macOS/Linux
+source venv/bin/activate
+
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# 3. Start Endee vector database
+# 4. Start Endee vector database
 docker-compose up -d endee
 
-# 4. Configure environment
-cp .env.example .env
-# Edit .env with your API keys
+# Wait 10 seconds for Endee to initialize
+# Verify: http://localhost:8704/health should return {"status":"ok"}
 
-# 5. Run Streamlit UI
+# 5. Configure environment
+cp .env.example .env
+
+# Edit .env and add your API key (choose one):
+# - For Groq (FREE): GROQ_API_KEY=your_groq_api_key_here
+# - For OpenAI: OPENAI_API_KEY=your_openai_api_key_here
+# - For Ollama: No API key needed, just run: ollama run llama3.2
+
+# 6. Run Streamlit app
 streamlit run app.py
 
-# Or run CLI demo
+# The app will open at http://localhost:8501
+# Upload documents and start asking questions!
+```
+
+### Optional: Run CLI Demo
+
+```bash
 python examples/interview_demo.py
 ```
 

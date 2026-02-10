@@ -5,7 +5,6 @@ Supports multi-collection architecture for document type segregation.
 Includes conversational memory, query rewriting, user personas, and query routing.
 """
 from typing import List, Dict, Optional
-from openai import OpenAI
 from datetime import datetime
 from config import Config
 from document_processor import DocumentProcessor
@@ -85,18 +84,17 @@ class RAGEngine:
         if enable_multi_collection:
             print("✓ Multi-collection mode enabled")
         
-        # LLM client
+        # LLM manager (handles OpenAI, Groq, Ollama)
+        from llm_manager import LLMManager
+        self.llm_manager = LLMManager()
         self.chat_model = chat_model or Config.CHAT_MODEL
-        self.openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
         
         # Conversation components (Phase 3)
         self.conversation_manager = None
         self.query_rewriter = None
         if enable_conversation:
-            from llm_manager import LLMManager
-            llm_manager = LLMManager()
             self.conversation_manager = ConversationManager()
-            self.query_rewriter = QueryRewriter(llm_manager=llm_manager)
+            self.query_rewriter = QueryRewriter(llm_manager=self.llm_manager)
             print("✓ Conversational memory enabled")
         
         # User persona system (Phase 4)
@@ -458,23 +456,23 @@ Instructions:
 Answer:"""
         
         try:
-            response = self.openai_client.chat.completions.create(
-                model=self.chat_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
+            # Use LLM manager instead of direct OpenAI client
+            messages = [
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+            
+            return self.llm_manager.generate(
+                messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens
             )
-            
-            return response.choices[0].message.content.strip()
             
         except Exception as e:
             return f"Error generating answer: {e}"

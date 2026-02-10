@@ -11,9 +11,12 @@ load_dotenv()
 class Config:
     """Configuration class for RAG application."""
     
-    # OpenAI Configuration
+    # LLM API Keys (Optional - use Groq, OpenAI, or local Ollama)
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+    
+    # Legacy model settings (not used with BGE embeddings)
+    EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
     CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-3.5-turbo")
     
     # Vector Database Configuration
@@ -45,11 +48,9 @@ class Config:
     
     @classmethod
     def validate(cls):
-        """Validate required configuration."""
-        if not cls.OPENAI_API_KEY:
-            raise ValueError(
-                "OPENAI_API_KEY is required. Please set it in .env file"
-            )
+        """Validate configuration (API keys are optional - checked by LLM manager)."""
+        # No validation needed - LLM manager handles API key checks
+        # Embeddings use local BGE model (no API key required)
         return True
     
     @classmethod
