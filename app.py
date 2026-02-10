@@ -365,7 +365,7 @@ with tab2:
                             if metadata.get('persona'):
                                 meta_items.append(f"👤 {metadata['persona'].title()}")
                             
-                            if metadata.get('collections_searched'):
+                            if metadata.get('collections_searched') and isinstance(metadata.get('collections_searched'), list):
                                 collections = ', '.join(metadata['collections_searched'])
                                 meta_items.append(f"🗂️ {collections}")
                             
@@ -446,7 +446,7 @@ with tab2:
                                     st.markdown(f"**Query:** {question}")
                                     st.markdown(f"**Explanation:** {routing_info.get('routing_explanation', 'N/A')}")
                                     
-                                    if routing_info.get('collections_searched'):
+                                    if routing_info.get('collections_searched') and isinstance(routing_info.get('collections_searched'), list):
                                         collections_str = ', '.join(routing_info['collections_searched'])
                                         st.markdown(f"**Collections Searched:** {collections_str}")
                                     
