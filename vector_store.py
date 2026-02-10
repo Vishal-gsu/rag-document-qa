@@ -521,29 +521,61 @@ class VectorStore:
     def clear_collection(self) -> None:
         """Clear the collection."""
         try:
-            if self.index is not None:
-                self.client.delete_index(self.collection_name)
-                self.index = None
-            
-            self.metadata_store = {}
-            self.vector_count = 0
-            self.dimension = None
-            
-            if self.metadata_file.exists():
-                self.metadata_file.unlink()
-            
-            print(f"✓ Cleared collection '{self.collection_name}'")
+            if self.enable_multi_collection:
+                # Multi-collection mode: clear all collections
+                for col_name in list(self.collections.keys()):
+                    try:
+                        if self.collections[col_name]['index'] is not None:
+                            self.client.delete_index(col_name)
+                    except Exception as e:
+                        print(f"⚠️ Error deleting index '{col_name}': {e}")
+                
+                self.collections = {}
+                self.metadata_stores = {}
+                
+                # Delete all metadata files
+                for meta_file in self.db_path.glob("*_metadata.pkl"):
+                    meta_file.unlink()
+                
+                print(f"✓ Cleared all collections")
+            else:
+                # Legacy single-collection mode
+                if self.index is not None:
+                    self.client.delete_index(self.collection_name)
+                    self.index = None
+                
+                self.metadata_store = {}
+                self.vector_count = 0
+                self.dimension = None
+                
+                if self.metadata_file.exists():
+                    self.metadata_file.unlink()
+                
+                print(f"✓ Cleared collection '{self.collection_name}'")
         except Exception as e:
             print(f"⚠️ Error clearing: {e}")
     
     def get_stats(self) -> Dict:
         """Get collection statistics."""
-        return {
-            'collection_name': self.collection_name,
-            'total_vectors': self.vector_count,
-            'dimension': self.dimension or 0,
-            'backend': 'Endee (HNSW)'
-        }
+        if self.enable_multi_collection:
+            # Multi-collection mode: aggregate stats
+            total_vectors = sum(col['vector_count'] for col in self.collections.values())
+            dimensions = [col['dimension'] for col in self.collections.values() if col['dimension']]
+            dimension = dimensions[0] if dimensions else 0
+            return {
+                'collection_name': f"{len(self.collections)} collections",
+                'total_vectors': total_vectors,
+                'dimension': dimension,
+                'backend': 'Endee (HNSW)'
+            }
+        else:
+            # Legacy single-collection mode
+            return {
+                'collection_name': self.collection_name,
+                'total_vectors': self.vector_count,
+                'dimension': self.dimension or 0,
+                'backend': 'Endee (HNSW)'
+            }
     
     
     def get_indexed_files(self, collection_name: str = None) -> set:
