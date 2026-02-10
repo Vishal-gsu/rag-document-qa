@@ -210,8 +210,8 @@ Query: "What Python experience do candidates have?"
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/Vishal-gsu/assignment_rag.git
-cd assignment_rag
+https://github.com/Vishal-gsu/rag-document-qa
+cd rag-document-qa
 
 # 2. Install dependencies
 pip install -r requirements.txt
