@@ -213,9 +213,16 @@ Query: "What Python experience do candidates have?"
 ### Quick Start
 
 ```bash
-# 1. Clone repository
+# 1. Clone repository and virtual environment
 git clone https://github.com/Vishal-gsu/rag-document-qa
 cd rag-document-qa
+
+### Create and Activate Virtual Environment
+
+**Windows:**
+```bash
+python -m venv rag
+rag\Scripts\activate
 
 # 2. Install dependencies
 pip install -r requirements.txt
