@@ -184,6 +184,185 @@ User query: "Find papers about transformers"
 Returns results with metadata
 ```
 
+### Phase 3: Conversational Memory
+
+### 6. Conversation Manager (`conversation_manager.py`)
+
+**Purpose**: Track conversation history for context-aware multi-turn dialogue
+
+**Key Features**:
+- Session-based conversation tracking with UUID
+- Pickle persistence for conversation storage
+- Turn-by-turn Q&A logging with timestamps
+- Metadata tracking (retrieved context, model, top_k)
+
+**Data Structure**:
+```python
+{
+    'session_id': 'uuid-string',
+    'turns': [
+        {
+            'question': 'What is machine learning?',
+            'answer': 'ML is a subset of AI...',
+            'timestamp': '2026-02-10T14:30:00',
+            'turn_number': 1,
+            'retrieved_context': [...],
+            'metadata': {'model': 'gpt-4', 'top_k': 5}
+        }
+    ],
+    'created_at': '2026-02-10T14:30:00',
+    'last_updated': '2026-02-10T14:35:00'
+}
+```
+
+**Key Methods**:
+- `create_session(user_id)` - Initialize new conversation
+- `add_turn(session_id, question, answer, context, metadata)` - Record turn
+- `get_history(session_id, last_n)` - Retrieve recent turns
+- `get_recent_context(session_id, last_n)` - Format for LLM context
+- `save_session(session_id)` - Persist to disk (auto after each turn)
+
+**Storage**: `data/conversations/{session_id}.pkl`
+
+### 7. Query Rewriter (`query_rewriter.py`)
+
+**Purpose**: Expand context-dependent queries using conversation history
+
+**When Rewriting Triggered**:
+- Pronouns detected: "it", "this", "that", "they", etc.
+- Context phrases: "what about", "tell me more", "also", etc.
+- Short queries: ≤3 words (likely depends on context)
+
+**Rewriting Process**:
+```
+User asks: "What about RNNs?"
+    ↓
+Check conversation history (last 3 turns)
+    ↓
+Previous: "What are neural networks?"
+Answer: "Neural networks are..."
+    ↓
+Build LLM prompt with history
+    ↓
+LLM rewrites: "What are Recurrent Neural Networks (RNNs)?"
+    ↓
+Use rewritten query for embedding/retrieval
+```
+
+**Example Rewrites**:
+```
+Original: "What about it?"
+Context: Previous question was "What is BERT?"
+Rewritten: "What about BERT?"
+
+Original: "Tell me more"
+Context: Previous question was "What are transformers?"
+Rewritten: "Tell me more about transformers"
+```
+
+**Performance**: 100-500ms overhead for LLM rewrite (low temperature for determinism)
+
+### 8. RAG Engine Integration
+
+**Conversation-Aware Query Method**:
+```python
+rag.query(
+    question="What about deep learning?",
+    session_id="uuid-abc123",  # Enable conversation tracking
+    enable_rewrite=True,        # Enable query rewriting
+    persona='intermediate'      # Phase 4: User persona
+)
+```
+
+**Flow with Conversation**:
+```
+1. Query received: "What about deep learning?"
+2. Load conversation history (last 3 turns)
+3. QueryRewriter detects context dependency
+4. Rewrite: "What about deep learning in machine learning?"
+5. Embed rewritten query
+6. Retrieve context (persona determines top_k)
+7. Generate answer (persona determines temperature, system_prompt)
+8. Save turn to ConversationManager
+```
+
+### Phase 4: User Persona System
+
+### 9. User Persona (`user_persona.py`)
+
+**Purpose**: Adaptive RAG behavior based on user expertise level
+
+**Predefined Personas**:
+
+| Persona | top_k | temperature | max_tokens | Strategy |
+|---------|-------|-------------|------------|----------|
+| 🌱 Beginner | 3 | 0.7 | 600 | Broad, fewer sources, detailed |
+| 📚 Intermediate | 5 | 0.5 | 500 | Balanced, standard approach |
+| 🎯 Expert | 7 | 0.3 | 400 | Precise, more sources, concise |
+| 🔬 Researcher | 10 | 0.2 | 700 | Comprehensive, academic focus |
+
+**Beginner Persona**:
+- Fewer sources (top_k=3) to avoid overwhelming
+- Higher temperature (0.7) for creative explanations
+- Longer answers (600 tokens) with examples
+
+- Simple language, no jargon
+- Concrete examples and analogies
+
+**Expert Persona**:
+- More sources (top_k=7) for comprehensive coverage
+- Lower temperature (0.3) for focused technical responses
+- Concise answers (400 tokens)
+- Technical terminology without over-explaining
+- Implementation details and edge cases
+
+**Researcher Persona**:
+- Maximum sources (top_k=10) for literature review
+- Lowest temperature (0.2) for factual accuracy
+- Longer answers (700 tokens) for detailed analysis
+- Academic language with citations
+- Methodology and experimental design focus
+
+**Adaptive Behavior**:
+```python
+# Auto-adapt to query complexity
+persona.adapt_to_query_complexity(
+    query="Explain transformer architecture multi-head attention",
+    base_persona='intermediate'
+)
+# → Increases top_k for complex query
+
+persona.adapt_to_query_complexity(
+    query="What is ML?",
+    base_persona='intermediate'
+)
+# → Decreases top_k for simple query
+```
+
+**Custom Personas**:
+```python
+persona.add_custom_persona(
+    name='data_scientist',
+    description='Focus on practical ML implementation',
+    top_k=6,
+    temperature=0.4,
+    system_prompt='You are a practical ML engineer...'
+)
+```
+
+**Integration with RAGEngine**:
+```python
+# Persona determines:
+# 1. Retrieval: top_k (how many chunks)
+# 2. Generation: temperature, max_tokens, system_prompt
+
+answer = rag.query(
+    question="Explain neural networks",
+    persona='beginner',           # Use beginner settings
+    adapt_to_query=True          # Auto-adjust if query is complex
+)
+```
+
 ## System Architecture Diagram
 
 ```
@@ -430,10 +609,11 @@ Returns results with metadata
 
 ### "What's novel about your approach?"
 
-"Three main innovations:
+"Four main innovations:
 1. **Intelligent document routing** - Most RAG systems dump everything in one index. Mine segregates by document type for better accuracy.
 2. **Specialized parsers** - Research papers get section detection (abstract, methodology, results), resumes get skill extraction, textbooks get chapter detection. This enables section-level search instead of just chunk-level.
-3. **Conversational memory with query rewriting** - Users can ask 'What is ML?' then follow up with 'What about deep learning?' The system uses LLM to rewrite the second query based on conversation history, making follow-ups natural and accurate."
+3. **Conversational memory with query rewriting** - Users can ask 'What is ML?' then follow up with 'What about deep learning?' The system uses LLM to rewrite the second query based on conversation history, making follow-ups natural and accurate.
+4. **User persona adaptation** - The system adjusts retrieval depth (top_k), generation style (temperature), and prompts based on user expertise level. Beginners get 3 sources with detailed explanations, experts get 7 sources with technical depth, researchers get 10 sources with academic focus."
 
 ### "How does it scale?"
 
@@ -442,16 +622,37 @@ Returns results with metadata
 - No single point of congestion
 - Can easily shard within collections if needed
 - Endee's HNSW handles millions of vectors per index
+- Conversation history stored per-session with efficient pickle serialization
+- Persona system adds zero retrieval overhead (just changes parameters)
 - Current system: tested with 5K documents, ready for 100K+"
+
+### "Tell me about the conversational capability"
+
+"The system has multi-turn conversation support with two key components:
+
+1. **ConversationManager**: Tracks sessions with UUID, stores Q&A turns with timestamps and metadata. Each turn includes the question, answer, retrieved context, and query metadata. Persisted to disk with pickle for durability.
+
+2. **QueryRewriter**: Detects context-dependent queries (pronouns, 'what about' phrases, short questions). Uses LLM with conversation history to expand queries. For example, 'What about it?' becomes 'What about BERT?' based on previous context.
+
+Performance overhead is 100-500ms for LLM rewriting, but the accuracy improvement is significant—users can ask natural follow-ups without repeating context."
+
+### "How does persona adaptation work?"
+
+"The system has 4 predefined personas:
+- **Beginner** (🌱): Retrieves 3 sources, temp 0.7, 600 token detailed explanations with examples
+- **Intermediate** (📚): Retrieves 5 sources, temp 0.5, 500 token balanced answers
+- **Expert** (🎯): Retrieves 7 sources, temp 0.3, 400 token concise technical responses
+- **Researcher** (🔬): Retrieves 10 sources, temp 0.2, 700 token academic analysis
+
+Plus adaptive behavior: the system analyzes query complexity (length, technical terms) and auto-adjusts top_k. A complex 25-word query about transformer architecture might get +2 sources even for intermediate users.
+
+This solves the 'one-size-fits-all' problem in RAG—beginners don't get overwhelmed with 10 sources, experts don't get dumbed-down explanations."
 
 ### "What would you improve next?"
 
-"Phase 4 is user personalization. I'll add three persona modes:
-- **Beginner**: Simpler language, more context (top_k=10), explanatory prompts
-- **Intermediate**: Balanced detail (top_k=5)
-- **Expert**: Concise answers, technical terminology (top_k=3)
+"Phase 5 is intelligent query routing. Right now users can benefit from multi-collection architecture, but query routing to specific collections is basic. Next step: auto-detect query intent—'find papers about BERT' routes to research_papers, 'show me Python skills' routes to resumes. Uses LLM-based classification of the query itself.
 
-Phase 5 adds intelligent query routing. Right now users can manually select collections. Next, the system will auto-detect query intent—like 'find papers about BERT' routes to research_papers, 'show me Python skills' routes to resumes. Uses LLM-based classification of the query itself, not just documents."
+Phase 6 is production polish: better UI with conversation branches, export options, analytics dashboard showing which personas and document types are most used, and A/B testing framework for prompt engineering."
 
 ## Phase Implementation Summary
 
@@ -518,7 +719,33 @@ Phase 5 adds intelligent query routing. Right now users can manually select coll
 - Conversation history UI with session stats
 - 100ms-500ms rewriting overhead
 
-### 🔜 Phase 4: User Persona System (PENDING)
+### ✅ Phase 4: User Persona System (COMPLETED)
+**Files Created**:
+- `user_persona.py` - Persona profiles and adaptive behavior
+
+**Modified**:
+- `rag_engine.py` - Persona-aware retrieval and generation
+- `app.py` - Streamlit persona selector with auto-adapt toggle
+
+**Tests**: 26/26 passing (all Phase 1-4)
+- Persona profile management (4 predefined profiles)
+- Adaptive behavior based on query complexity
+- RAG integration with persona parameters
+- Generation parameter differences
+
+**Key Achievements**:
+- 4 expertise levels: Beginner/Intermediate/Expert/Researcher
+- Auto-adaptation to query complexity
+- Persona-specific system prompts and retrieval settings
+- Custom persona creation support
+
+**Persona Profiles**:
+- 🌱 Beginner: top_k=3, temp=0.7, 600 tokens, detailed explanations
+- 📚 Intermediate: top_k=5, temp=0.5, 500 tokens, balanced approach
+- 🎯 Expert: top_k=7, temp=0.3, 400 tokens, technical depth
+- 🔬 Researcher: top_k=10, temp=0.2, 700 tokens, scholarly focus
+
+### 🔜 Phase 5: Query Routing Intelligence (PENDING)
 **Planned**:
 - Beginner/Intermediate/Expert modes
 - Dynamic top_k adjustment

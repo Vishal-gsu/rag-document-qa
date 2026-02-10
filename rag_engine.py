@@ -2,7 +2,7 @@
 RAG Engine Module
 Orchestrates the complete RAG pipeline: retrieval + generation.
 Supports multi-collection architecture for document type segregation.
-Includes conversational memory and query rewriting.
+Includes conversational memory, query rewriting, and user personas.
 """
 from typing import List, Dict, Optional
 from openai import OpenAI
@@ -14,6 +14,7 @@ from vector_store import VectorStore
 from document_classifier import DocumentClassifier
 from conversation_manager import ConversationManager
 from query_rewriter import QueryRewriter
+from user_persona import UserPersona
 
 
 class RAGEngine:
@@ -27,7 +28,9 @@ class RAGEngine:
                  collection_name: str = None,
                  chat_model: str = None,
                  enable_multi_collection: bool = None,
-                 enable_conversation: bool = True):
+                 enable_conversation: bool = True,
+                 enable_personas: bool = True,
+                 default_persona: str = 'intermediate'):
         """
         Initialize RAG engine.
         
@@ -37,6 +40,8 @@ class RAGEngine:
             chat_model: OpenAI chat model to use
             enable_multi_collection: Enable multi-collection mode
             enable_conversation: Enable conversational memory
+            enable_personas: Enable user persona system
+            default_persona: Default persona (beginner/intermediate/expert/researcher)
         """
         # Validate configuration
         Config.validate()
@@ -47,6 +52,7 @@ class RAGEngine:
         
         self.enable_multi_collection = enable_multi_collection
         self.enable_conversation = enable_conversation
+        self.enable_personas = enable_personas
         
         # Initialize components
         self.embedding_engine = EmbeddingEngine()
@@ -86,6 +92,12 @@ class RAGEngine:
             self.conversation_manager = ConversationManager()
             self.query_rewriter = QueryRewriter(llm_manager=llm_manager)
             print("✓ Conversational memory enabled")
+        
+        # User persona system (Phase 4)
+        self.persona_manager = None
+        if enable_personas:
+            self.persona_manager = UserPersona(default_persona=default_persona)
+            print(f"✓ User persona system enabled (default: {default_persona})")
         
         print("✓ RAG Engine initialized")
     
@@ -219,17 +231,21 @@ class RAGEngine:
               return_context: bool = False,
               similarity_threshold: float = 0.0,
               session_id: str = None,
-              enable_rewrite: bool = True) -> str:
+              enable_rewrite: bool = True,
+              persona: str = None,
+              adapt_to_query: bool = False) -> str:
         """
         Query the RAG system with a question.
         
         Args:
             question: User's question
-            top_k: Number of context chunks to retrieve
+            top_k: Number of context chunks to retrieve (overrides persona default)
             return_context: Whether to return retrieved context
             similarity_threshold: Minimum similarity score (0.0 to 1.0) for results
             session_id: Conversation session ID for context tracking
             enable_rewrite: Enable query rewriting based on conversation history
+            persona: User persona (beginner/intermediate/expert/researcher)
+            adapt_to_query: Dynamically adapt persona based on query complexity
             
         Returns:
             Generated answer (and context if return_context=True)
@@ -237,7 +253,20 @@ class RAGEngine:
         if not question or not question.strip():
             return "Please provide a valid question."
         
-        top_k = top_k or Config.TOP_K_RESULTS
+        # Apply persona settings (Phase 4)
+        persona_profile = None
+        if self.enable_personas and self.persona_manager:
+            if adapt_to_query:
+                persona_profile = self.persona_manager.adapt_to_query_complexity(question, persona)
+            else:
+                persona_profile = self.persona_manager.get_profile(persona)
+            
+            # Use persona's top_k if not explicitly overridden
+            if top_k is None:
+                top_k = persona_profile.top_k
+        else:
+            top_k = top_k or Config.TOP_K_RESULTS
+        
         original_question = question
         
         print(f"\n{'='*60}")
@@ -289,7 +318,17 @@ class RAGEngine:
         
         # Step 4: Generate answer using LLM
         print(f"\nStep 3: Generating answer with {self.chat_model}...")
-        answer = self._generate_answer(question, context)
+        if persona_profile:
+            print(f"  Using persona: {persona_profile.name}")
+            answer = self._generate_answer(
+                question, 
+                context,
+                system_prompt=persona_profile.system_prompt,
+                temperature=persona_profile.temperature,
+                max_tokens=persona_profile.max_tokens
+            )
+        else:
+            answer = self._generate_answer(question, context)
         
         print(f"\n{'='*60}")
         print("💡 Answer:")
@@ -308,7 +347,8 @@ class RAGEngine:
                     'rewritten_query': question if question != original_question else None,
                     'top_k': top_k,
                     'model': self.chat_model,
-                    'num_results': len(results)
+                    'num_results': len(results),
+                    'persona': persona_profile.name if persona_profile else None
                 }
             )
         
@@ -339,30 +379,40 @@ class RAGEngine:
         
         return "\n\n".join(context_parts)
     
-    def _generate_answer(self, question: str, context: str) -> str:
+    def _generate_answer(self, 
+                        question: str, 
+                        context: str,
+                        system_prompt: str = None,
+                        temperature: float = 0.3,
+                        max_tokens: int = 500) -> str:
         """
         Generate answer using LLM with retrieved context.
         
         Args:
             question: User's question
             context: Retrieved context
+            system_prompt: Custom system prompt (uses default if None)
+            temperature: LLM temperature
+            max_tokens: Maximum tokens in response
             
         Returns:
             Generated answer
         """
+        # Use default prompt if none provided
+        if system_prompt is None:
+            system_prompt = "You are a helpful assistant that provides accurate answers based on given context."
+        
         # Construct prompt
-        prompt = f"""You are a helpful assistant that answers questions based on the provided context.
-
-Context:
+        prompt = f"""Context:
 {context}
 
 Question: {question}
 
 Instructions:
-1. Answer the question using ONLY the information from the context above
+1. Answer the question using the information from the context above
 2. If the context doesn't contain enough information to answer, say so
-3. Be concise and accurate
-4. Cite which source(s) you used (e.g., "According to Source 1...")
+3. Be accurate and follow the guidelines in the system prompt
+4. Cite which source(s) you used when relevant (e.g., "According to Source 1...")
 
 Answer:"""
         
@@ -372,15 +422,15 @@ Answer:"""
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a helpful assistant that provides accurate answers based on given context."
+                        "content": system_prompt
                     },
                     {
                         "role": "user",
                         "content": prompt
                     }
                 ],
-                temperature=0.3,
-                max_tokens=500
+                temperature=temperature,
+                max_tokens=max_tokens
             )
             
             return response.choices[0].message.content.strip()

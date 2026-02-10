@@ -61,6 +61,12 @@ if "similarity_threshold" not in st.session_state:
 if "enable_conversation" not in st.session_state:
     st.session_state.enable_conversation = True
 
+if "current_persona" not in st.session_state:
+    st.session_state.current_persona = 'intermediate'
+
+if "adapt_persona_to_query" not in st.session_state:
+    st.session_state.adapt_persona_to_query = False
+
 
 def initialize_rag():
     """Initialize RAG engine if not already done."""
@@ -231,6 +237,46 @@ with tab2:
                     value=st.session_state.enable_conversation,
                     help="When enabled, the system remembers context from previous questions"
                 )
+                
+                st.markdown("---")
+                st.markdown("### 👤 User Persona")
+                
+                # Persona selector
+                persona_options = {
+                    'beginner': '🌱 Beginner - Detailed explanations',
+                    'intermediate': '📚 Intermediate - Balanced approach',
+                    'expert': '🎯 Expert - Technical depth',
+                    'researcher': '🔬 Researcher - Academic focus'
+                }
+                
+                selected_persona = st.selectbox(
+                    "Select your expertise level:",
+                    options=list(persona_options.keys()),
+                    format_func=lambda x: persona_options[x],
+                    index=list(persona_options.keys()).index(st.session_state.current_persona),
+                    help="Adjusts answer style, detail level, and retrieval depth"
+                )
+                
+                if selected_persona != st.session_state.current_persona:
+                    st.session_state.current_persona = selected_persona
+                    st.success(f"Persona updated to {persona_options[selected_persona]}")
+                
+                # Adaptive persona toggle
+                st.session_state.adapt_persona_to_query = st.checkbox(
+                    "Auto-adapt to query complexity",
+                    value=st.session_state.adapt_persona_to_query,
+                    help="Automatically adjust persona based on your question"
+                )
+                
+                # Show current persona details
+                if st.session_state.rag_engine and hasattr(st.session_state.rag_engine, 'persona_manager'):
+                    if st.session_state.rag_engine.persona_manager:
+                        profile = st.session_state.rag_engine.persona_manager.get_profile(st.session_state.current_persona)
+                        with st.expander("📋 Persona Details"):
+                            st.text(f"Top-K: {profile.top_k}")
+                            st.text(f"Temperature: {profile.temperature}")
+                            st.text(f"Max Tokens: {profile.max_tokens}")
+                            st.text(f"Strategy: {profile.retrieval_strategy}")
             
             # Display conversation history from ConversationManager
             if st.session_state.rag_engine and hasattr(st.session_state.rag_engine, 'conversation_manager'):
@@ -272,14 +318,16 @@ with tab2:
             if ask_button and question:
                 with st.spinner("Thinking..."):
                     try:
-                        # Use RAG engine's query method with conversational support
+                        # Use RAG engine's query method with conversational and persona support
                         result = st.session_state.rag_engine.query(
                             question=question,
-                            top_k=st.session_state.top_k_results,
+                            top_k=None,  # Let persona decide unless overridden
                             return_context=True,
                             similarity_threshold=st.session_state.similarity_threshold,
                             session_id=st.session_state.session_id if st.session_state.enable_conversation else None,
-                            enable_rewrite=st.session_state.enable_conversation
+                            enable_rewrite=st.session_state.enable_conversation,
+                            persona=st.session_state.current_persona,
+                            adapt_to_query=st.session_state.adapt_persona_to_query
                         )
                         
                         answer = result['answer']
