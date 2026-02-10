@@ -228,7 +228,7 @@ rag\Scripts\activate
 pip install -r requirements.txt
 
 # 3. Start Endee vector database
-docker-compose up -d endee
+docker-compose up -d endee_db
 
 # 4. Configure environment
 cp .env.example .env
