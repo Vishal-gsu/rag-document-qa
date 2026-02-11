@@ -31,17 +31,19 @@ class ConversationManager:
         # Session metadata
         self.session_metadata = {}
     
-    def create_session(self, user_id: str = None) -> str:
+    def create_session(self, user_id: str = None, session_id: str = None) -> str:
         """
         Create a new conversation session.
         
         Args:
             user_id: Optional user identifier
+            session_id: Optional session ID (generates new UUID if None)
             
         Returns:
             Session ID (UUID)
         """
-        session_id = str(uuid.uuid4())
+        if session_id is None:
+            session_id = str(uuid.uuid4())
         
         self.sessions[session_id] = {
             'turns': [],
@@ -71,7 +73,7 @@ class ConversationManager:
         if session_id not in self.sessions:
             # Load from disk if exists, otherwise create
             if not self._load_session(session_id):
-                self.create_session()
+                self.create_session(session_id=session_id)
         
         turn = {
             'question': question,
