@@ -166,8 +166,19 @@ Rewritten Question:"""
         """
         try:
             # Use LLM to generate rewrite
-            response = self.llm_manager.generate_response(
-                prompt=prompt,
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a query rewriting assistant that makes questions standalone and context-aware."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+            
+            response = self.llm_manager.generate(
+                messages=messages,
                 max_tokens=100,
                 temperature=0.3  # Low temperature for deterministic rewrites
             )
