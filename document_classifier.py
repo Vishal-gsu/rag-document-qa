@@ -70,12 +70,18 @@ class DocumentClassifier:
                 r'\bisbn\b',
                 r'\btable of contents\b',
                 r'\bpreface\b',
+                r'\bintroduction to\b',  # Added: common in educational docs
+                r'\bfundamentals?\b',     # Added: "Machine Learning Fundamentals"
             ],
             'weak': [
                 r'\bsummary\b',
                 r'\bkey terms\b',
                 r'\breview questions\b',
                 r'\bglossary\b',
+                r'\btypes of\b',          # Added: "Types of Machine Learning"
+                r'\bcommon algorithms?\b', # Added: algorithm lists
+                r'\bapplications?:\b',    # Added: application sections
+                r'\bkey concepts?:\b',    # Added: concept sections
             ]
         }
     

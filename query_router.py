@@ -179,9 +179,16 @@ class QueryRouter:
             if score > 0
         ]
         
-        # If no matches, return all available collections
+        # If no matches or very low confidence, search relevant collections
         if not matched_collections:
             matched_collections = available_collections
+        elif max(scores.values()) < 3:  # Low confidence threshold (< 3 points)
+            # Low confidence - include related collections to avoid missing results
+            # Keep matched ones but add 'general_docs' and 'textbooks' as fallback
+            fallback_collections = ['general_docs', 'textbooks'] 
+            for coll in fallback_collections:
+                if coll in available_collections and coll not in matched_collections:
+                    matched_collections.append(coll)
         
         # Limit to max_collections if specified
         if max_collections and len(matched_collections) > max_collections:

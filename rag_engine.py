@@ -295,14 +295,28 @@ class RAGEngine:
             if auto_route:
                 available = list(self.vector_store.collections.keys()) if self.enable_multi_collection else None
                 search_collections = self.query_router.route_query(question, available)
-                print(f"  Routing: {', '.join(search_collections)}")
                 
                 # Get routing confidence scores
                 all_scores = self.query_router.get_intent_confidence(question)
                 if all_scores and search_collections:
-                    # Calculate confidence as average of selected collections
-                    routing_confidence = sum(all_scores.get(c, 0) for c in search_collections) / len(search_collections)
-                    routing_explanation = f"Query routed to {len(search_collections)} collection(s) based on keyword/phrase matching"
+                    # Calculate confidence as maximum score among all collections
+                    max_confidence = max(all_scores.values()) if all_scores else 0.0
+                    routing_confidence = max_confidence
+                    
+                    # If confidence is very low, search multiple collections
+                    if routing_confidence < 0.3 and len(search_collections) == 1:
+                        # Low confidence - expand search to include general_docs
+                        if 'general_docs' in available and 'general_docs' not in search_collections:
+                            search_collections.append('general_docs')
+                        if 'textbooks' in available and 'textbooks' not in search_collections:
+                            search_collections.append('textbooks')
+                        routing_explanation = f"Low confidence ({routing_confidence:.0%}) - searching {len(search_collections)} collections: {', '.join(search_collections)}"
+                    else:
+                        routing_explanation = f"Query routed to {len(search_collections)} collection(s) based on keyword/phrase matching"
+                    
+                    print(f"  Routing: {', '.join(search_collections)}")
+                    if routing_confidence < 0.3:
+                        print(f"  ⚠️  {routing_explanation}")
         
         original_question = question
         
